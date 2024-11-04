@@ -1,0 +1,11 @@
+{
+	"id": "dblp_fetch",
+	"name": "DBLP Data Fetcher",
+	"version": "1.0.0",
+	"minAppVersion": "0.15.0",
+	"description": "Creates notes and links for papers and authors using DBLP API calls.",
+	"author": "Taylor Dohmen",
+	"authorUrl": "",
+	"fundingUrl": "",
+	"isDesktopOnly": false
+}
