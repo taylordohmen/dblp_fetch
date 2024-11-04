@@ -15,8 +15,15 @@ export default class DblpFetchPlugin extends Plugin {
 				if (mdView) {
                     const mdfile = mdView.file;
 					if (mdfile) {
-						this.app.fileManager.processFrontMatter(mdfile);
-						
+						this.app.fileManager.processFrontMatter(
+							mdfile,
+							(frontmatter) => {
+								const dblpUrl = frontmatter['dblp'];
+								if (dblpUrl) {
+									this.fetch(dblpUrl);
+								}
+							}
+						);
 					}
 
 					// If checking is true, we're simply "checking" if the command can be run.
@@ -30,6 +37,10 @@ export default class DblpFetchPlugin extends Plugin {
 			}
 		});
     }
+
+	private fetch(dblpProfileUrl: string) {
+		
+	}
 
     async onunload() { }
 }
