@@ -2,9 +2,10 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as xml2js from 'xml2js';
 import * as axios from 'axios';
-import * as util from 'node:util';
 
-util.inspect.defaultOptions.maxArrayLength = null;
+// The following two lines configure node so that all array values are printed when printing an array. useful for debugging.
+// import * as util from 'node:util';
+// util.inspect.defaultOptions.maxArrayLength = null;
 
 // Constants
 const PEOPLE_DIR = '/Users/taylordohmen/Documents/plugin-dev/People/';
@@ -14,29 +15,30 @@ const DBLP_BASE_PID = 'https://dblp.org/pid/';
 const DBLP_BASE_PUB = 'https://dblp.dagstuhl.de/rec/';
 
 const FORBIDDEN_CHAR_REPLACEMENT = {
-	'/': '*slash*',
-	'\\': '*hsals*',
-	'[': '(',
-	']': ')',
-	':': ' -',
-	'^': '*carot*',
-	'|': '*pipe*',
-	'#': '*hash*'
+	'/': '⁄',
+	'\\': '＼',
+	'[': '［',
+	']': '］',
+	':': '﹕',
+	'^': '＾',
+	'|': '┃',
+	'#': '＃',
+	'?': '﹖'
 };
 
 // Helper functions
-const sanitize = (fileName) => {
+const sanitize = (fileName: string) => {
 	return Object.entries(FORBIDDEN_CHAR_REPLACEMENT).reduce(
 		(acc, [key, value]) => acc.replace(key, value),
 		fileName
 	);
 };
 
-const hasProperties = (lines) => {
+const hasProperties = (lines: Array<string>) => {
 	return lines && lines.length > 0 && lines[0] === '---\n';
 };
 
-const dblpExists = (lines) => {
+const dblpExists = (lines: Array<string>) => {
 	let i = 1;
 	while (lines[i] !== '---\n') {
 		if (lines[i].startsWith('dblp')) {
@@ -47,17 +49,21 @@ const dblpExists = (lines) => {
 	return false;
 };
 
-const trimName = (name) => {
+const trimName = (name: string) => {
 	return name.replaceAll('/[0-9]/g', '').trim();
 	// return name[name.length - 1].match(/\d/) ? name.slice(0, -5) : name;
 };
 
-const parseXml = async (xmlString) => {
+const parseXml = async (xmlString: xml2js.convertableToString) => {
 	return new Promise((resolve, reject) => {
-		xml2js.parseString(xmlString, { ignoreAttrs: false, explicitArray: false }, (err, result) => {
-			if (err) reject(err);
-			else resolve(result);
-		});
+		xml2js.parseString(
+			xmlString,
+			{ ignoreAttrs: false, explicitArray: false },
+			(err, result) => {
+				if (err) reject(err);
+				else resolve(result);
+			}
+		);
 	});
 };
 
@@ -87,7 +93,7 @@ async function main() {
 
 	const publications = dblpPerson.r.map(
 		x => x.inproceedings || x.article
-	).filter(
+	).filter( //removes undefined elements from the array
 		x => x
 	);
 
@@ -114,8 +120,11 @@ async function main() {
 	);
 
 	const existingPeople = fs.readdirSync(PEOPLE_DIR)
-		.filter(file => file.endsWith('.md'))
-		.map(file => file.slice(0, -3));
+		.filter(
+			file => file.endsWith('.md')
+		).map(
+			file => file.slice(0, -3)
+		);
 
 	// Create/update coauthor files
 	for (const coauthor of coauthors) {
