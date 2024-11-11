@@ -1,4 +1,4 @@
-import { Editor, FrontMatterInfo, getFrontMatterInfo, MarkdownView, Notice, Plugin, requestUrl, TFile, TFolder } from 'obsidian';
+import { Editor, FrontMatterInfo, getFrontMatterInfo, MarkdownView, Notice, Plugin, requestUrl, TFile } from 'obsidian';
 import * as xml2js from 'xml2js';
 
 const PEOPLE_DIR = 'People';
@@ -49,9 +49,7 @@ const parseXml = async (xmlString: xml2js.convertableToString) => {
 	});
 };
 
-// const trimName = (name: string) => name.replaceAll(/[0-9]/g, '').trim();
-
-const sanitize = (fileName: string) => {
+const sanitize = (fileName: string): string => {
 	if (typeof fileName !== 'string'){
 		fileName = fileName._;
 	}
@@ -59,7 +57,7 @@ const sanitize = (fileName: string) => {
 		fileName = fileName.replaceAll(key, value);
 	}
 	return fileName;
-}
+};
 
 const hasProperties = (lines: Array<string>) => lines && lines.length > 0 && lines[0] === '---';
 
@@ -102,18 +100,16 @@ export default class DblpFetchPlugin extends Plugin {
 
 	}
 
-	private async createFile(path, content) {
+	private async createFile(path, content): void {
 		try{
 			await this.app.vault.create(path, content);
 			return true;
 		} catch(e) {
-			// console.log(e);
-			// console.log(path);
 			return false;
 		}
 	}
 
-	private async createPublicationMdFiles(queued, type) {
+	private async createPublicationMdFiles(queued, type): void {
 		for (const pub of queued) {
 			const title: string = sanitize(pub.title);
 			const year: string = pub.year;
@@ -163,8 +159,6 @@ export default class DblpFetchPlugin extends Plugin {
 					const fileContents: string = await this.app.vault.read(file);
 					const frontMatterInfo: FrontMatterInfo = await getFrontMatterInfo(fileContents);
 					fileKey = frontMatterInfo.frontmatter.split(': ')[1].trim();
-					console.log(`fileKey: ${fileKey}`);
-					console.log(`key: ${key}`);
 				}
 				if (key === fileKey) {
 					created = true;
@@ -181,7 +175,7 @@ export default class DblpFetchPlugin extends Plugin {
 		}
 	}
 
-	private async fetch(dblpUrl: string) {
+	private async fetch(dblpUrl: string): void {
 
 		// Fetch and parse XML data
 		const response: string = await requestUrl(`${dblpUrl}.xml`).text;
@@ -199,10 +193,6 @@ export default class DblpFetchPlugin extends Plugin {
 		const informalPubs = dblpPerson.r
 			.filter(x => x.article && x.article.$.publtype && x.article.$.publtype === 'informal')
 			.map(x => x.article);
-
-		console.log(confPubs);
-		console.log(journalPubs);
-		console.log(informalPubs);
 
 		await this.createPublicationMdFiles(confPubs, CONFERENCE_TYPE);
 		await this.createPublicationMdFiles(journalPubs, JOURNAL_TYPE);
