@@ -59,9 +59,9 @@ const sanitize = (fileName: string): string => {
 	return fileName;
 };
 
-const hasProperties = (lines: Array<string>) => lines && lines.length > 0 && lines[0] === '---';
+const hasProperties = (lines: Array<string>): boolean => lines && lines.length > 0 && lines[0] === '---';
 
-const dblpExists = (lines: Array<string>) => {
+const dblpExists = (lines: Array<string>): boolean => {
 	let i = 1;
 	while (lines[i] !== '---') {
 		if (lines[i].startsWith('dblp: ')) {
@@ -100,7 +100,7 @@ export default class DblpFetchPlugin extends Plugin {
 
 	}
 
-	private async createFile(path, content): void {
+	private async createFile(path: string, content: string): void {
 		try{
 			await this.app.vault.create(path, content);
 			return true;
@@ -109,7 +109,7 @@ export default class DblpFetchPlugin extends Plugin {
 		}
 	}
 
-	private async createPublicationMdFiles(queued, type): void {
+	private async createPublicationMdFiles(queued: Array<unknown>, type: string): void {
 		for (const pub of queued) {
 			const title: string = sanitize(pub.title);
 			const year: string = pub.year;
@@ -217,28 +217,29 @@ export default class DblpFetchPlugin extends Plugin {
 		for (const coauthor of coauthors) {
 			const { name, pid } = coauthor;
 			const filePath = `${PEOPLE_DIR}/${name}.md`;
+			
 			if (existingPeople.has(name)) {
 				const file = await this.app.vault.getFileByPath(filePath);
-				await this.app.vault.process(file,
-					(content: string) => {
-						let newContent = content.split('\n');
-						if (newContent.length > 0) {
-							if (hasProperties(newContent) && !dblpExists(newContent)) {
-								newContent.splice(1, 0, `dblp: ${DBLP_BASE_PID}/${pid}`);
-							} else if (!hasProperties(newContent)) {
-								newContent = [
-									'---',
-									`dblp: ${DBLP_BASE_PID}/${pid}`,
-									'---',
-									...content
-								];
-							}
-							return newContent.join('\n');
-						} else {
-							return `---\ndblp: ${DBLP_BASE_PID}/${pid}\n---\n`;
+				
+				await this.app.vault.process(file, (content: string) => {
+					let newContent = content.split('\n');
+					if (newContent.length > 0) {
+						if (hasProperties(newContent) && !dblpExists(newContent)) {
+							newContent.splice(1, 0, `dblp: ${DBLP_BASE_PID}/${pid}`);
+						} else if (!hasProperties(newContent)) {
+							newContent = [
+								'---',
+								`dblp: ${DBLP_BASE_PID}/${pid}`,
+								'---',
+								...content
+							];
 						}
+						return newContent.join('\n');
+					} else {
+						return `---\ndblp: ${DBLP_BASE_PID}/${pid}\n---\n`;
 					}
-				);
+				});
+				
 			} else {
 				await this.createFile(filePath, `---\ndblp: ${DBLP_BASE_PID}/${pid}\n---\n`);
 			}
