@@ -1,8 +1,10 @@
-import { Editor, MarkdownView, Plugin, requestUrl, TFile } from 'obsidian';
+import { Editor, MarkdownView, Notice, Plugin, requestUrl, TFile } from 'obsidian';
 import * as xml2js from 'xml2js';
 
 const PEOPLE_DIR = 'People';
-const PAPER_DIR = 'Papers';
+const CONF_PAPER_DIR = 'Papers/Conference';
+const JOURNAL_PAPER_DIR = 'Papers/Journal';
+const INFORMAL_PAPER_DIR = 'Papers/Informal';
 
 const DBLP_BASE_PID = 'https://dblp.org/pid';
 const DBLP_BASE_PUB = 'https://dblp.dagstuhl.de/rec';
@@ -10,13 +12,26 @@ const DBLP_BASE_PUB = 'https://dblp.dagstuhl.de/rec';
 const FORBIDDEN_CHAR_REPLACEMENT = {
 	'/': '⁄',
 	'\\': '＼',
-	'[': '［',
-	']': '］',
 	':': '﹕',
+	';': ';',
 	'^': '＾',
 	'|': '┃',
 	'#': '＃',
-	'?': '﹖'
+	'?': '﹖',
+	'~': '～',
+	'$': '＄',
+	'!': '！',
+	'&': '＆',
+	'@': '＠',
+	'%': '％',
+	'"': '＂',
+	'\'': '＇',
+	'<': '＜',
+	'>': '＞',
+	'{': '｛',
+	'}': '｝',
+	'[': '［',
+	']': '］'
 };
 
 const parseXml = async (xmlString: xml2js.convertableToString) => {
@@ -35,8 +50,15 @@ const parseXml = async (xmlString: xml2js.convertableToString) => {
 
 const trimName = (name: string) => name.replaceAll(/[0-9]/g, '').trim();
 
-const sanitize = (fileName: string) => Object.entries(FORBIDDEN_CHAR_REPLACEMENT)
-	.reduce((acc, [key, value]) => acc.replace(key, value), fileName);
+const sanitize = (fileName: string) => {
+	if (typeof fileName !== 'string'){
+		fileName = fileName._;
+	}
+	for (const [key, value] of Object.entries(FORBIDDEN_CHAR_REPLACEMENT)) {
+		fileName = fileName.replaceAll(key, value);
+	}
+	return fileName;
+}
 
 const hasProperties = (lines: Array<string>) => lines && lines.length > 0 && lines[0] === '---';
 
@@ -79,6 +101,44 @@ export default class DblpFetchPlugin extends Plugin {
 
 	}
 
+	private async createFile(path, content) {
+		try{
+			await this.app.vault.create(path, content);
+			return true;
+		} catch(e) {
+			console.log(e);
+			console.log(path);
+			return false;
+		}
+	}
+
+	private async createPublicationMdFiles(queued, existingPubs, path) {
+		for (const pub of queued) {
+			const title = sanitize(pub.title);
+			if (!existingPubs.has(title)) {
+				const citation = await requestUrl(`${DBLP_BASE_PUB}/${pub.$.key}.bib`).text;
+				let authors;
+				if (pub.author.length) {
+					authors = pub.author.map(author => `author:: [[${trimName(author._)}]]`);
+				} else {
+					authors = [`author:: [[${trimName(pub.author._)}]]`]
+				}
+				const content = `\`\`\`bibtex\n${citation}\`\`\`\n${authors.join('\n')}`;
+					
+				let created = await this.createFile(`${path}/${title}.md`, content);
+				if (!created) {
+					const altTitle = sanitize(`${title}(${pub.$.key})`);
+					console.log(`ALT TITLE: ${altTitle}`);
+					created = await this.createFile(`${path}/${altTitle}.md`, content);
+				}
+				if (!created) {
+					console.log(`FAILED TO CREATE: ${path}/${title}.md AND ${path}/${altTitle}.md`);
+					console.log('MOVING ON...');
+				}
+			}
+		}
+	}
+
 	private async fetch(dblpUrl: string) {
 
 		// Fetch and parse XML data
@@ -86,33 +146,29 @@ export default class DblpFetchPlugin extends Plugin {
 		const xmlData = await parseXml(response);
 		const dblpPerson = xmlData.dblpperson;
 
-		const existingPubs: Set<string> = new Set(
-			this.app.vault.getFolderByPath(PAPER_DIR).children
-				.map((file: TFile) => file.name.slice(0, -3))
+		const existingConfPubs: Set<string> = new Set(
+			await this.app.vault.getFolderByPath(CONF_PAPER_DIR).children.map((file: TFile) => file.name.slice(0, -3))
+		);
+		const existingJournalPubs: Set<string> = new Set(
+			await this.app.vault.getFolderByPath(JOURNAL_PAPER_DIR).children.map((file: TFile) => file.name.slice(0, -3))
+		);
+		const existingInformalPubs: Set<string> = new Set(
+			await this.app.vault.getFolderByPath(INFORMAL_PAPER_DIR).children.map((file: TFile) => file.name.slice(0, -3))
 		);
 
-		console.log(existingPubs);
+		const confPubs = dblpPerson.r
+			.filter(x => x.inproceedings)
+			.map(x => x.inproceedings);
+		const journalPubs = dblpPerson.r
+			.filter(x => x.article && !x.article.$.publtype)
+			.map(x => x.article);
+		const informalPubs = dblpPerson.r
+			.filter(x => x.article && x.article.$.publtype && x.article.$.publtype === 'informal')
+			.map(x => x.article);
 
-		const publications = dblpPerson.r
-			.map(x => x.inproceedings || x.article)
-			.filter(x => x); //removes undefined elements from the array
-
-		console.log(publications);
-
-		// Create publication files
-		for (const pub of publications) {
-			let title = sanitize(pub.title);
-			if (pub.$.publtype && pub.$.publtype === 'informal') {
-				title = `${title}(informal)`;
-			}
-			if (!existingPubs.has(title)) {
-				const citation = await requestUrl(`${DBLP_BASE_PUB}/${pub.$.key}.bib`).text;
-				const authors = pub.author
-					.map(author => `author:: [[${trimName(author._)}]]`);
-				const content = `\`\`\`bibtex\n${citation}\`\`\`\n${authors.join('\n')}`;
-				this.app.vault.create(`${PAPER_DIR}/${title}.md`, content);
-			}
-		}
+		await this.createPublicationMdFiles(confPubs, existingConfPubs, CONF_PAPER_DIR);
+		await this.createPublicationMdFiles(journalPubs, existingJournalPubs, JOURNAL_PAPER_DIR);
+		await this.createPublicationMdFiles(informalPubs, existingInformalPubs, INFORMAL_PAPER_DIR);
 
 
 		// Process coauthors
@@ -125,10 +181,9 @@ export default class DblpFetchPlugin extends Plugin {
 				}
 			});
 
-		console.log(coauthors);
 
-		const existingPeople = new Set(this.app.vault.getFolderByPath(PEOPLE_DIR).children
-			.map((file: TFile) => (file.name.slice(0, -3)))
+		const existingPeople = new Set(
+			await this.app.vault.getFolderByPath(PEOPLE_DIR).children.map((file: TFile) => (file.name.slice(0, -3)))
 		);
 
 		// Create/update coauthor files
@@ -136,8 +191,8 @@ export default class DblpFetchPlugin extends Plugin {
 			const { name, pid } = coauthor;
 			const filePath = `${PEOPLE_DIR}/${name}.md`;
 			if (existingPeople.has(name)) {
-				const file = this.app.vault.getFileByPath(filePath);
-				this.app.vault.process(file,
+				const file = await this.app.vault.getFileByPath(filePath);
+				await this.app.vault.process(file,
 					(content: string) => {
 						let newContent = content.split('\n');
 						if (newContent.length > 0) {
@@ -158,9 +213,11 @@ export default class DblpFetchPlugin extends Plugin {
 					}
 				);
 			} else {
-				this.app.vault.create(filePath, `---\ndblp: ${DBLP_BASE_PID}/${pid}\n---\n`);
+				await this.createFile(filePath, `---\ndblp: ${DBLP_BASE_PID}/${pid}\n---\n`);
 			}
 		}
+		console.log(`done fetching data from ${dblpUrl}`);
+		new Notice(`done fetching data from ${dblpUrl}`);
 	}
 
 	async onunload() { }
