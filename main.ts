@@ -1,4 +1,4 @@
-import { Editor, MarkdownView, Notice, Plugin, requestUrl, TFile } from 'obsidian';
+import { Editor, FrontMatterInfo, getFrontMatterInfo, MarkdownView, Notice, Plugin, requestUrl, TFile, TFolder } from 'obsidian';
 import * as xml2js from 'xml2js';
 
 const PEOPLE_DIR = 'People';
@@ -8,6 +8,10 @@ const INFORMAL_PAPER_DIR = 'Papers/Informal';
 
 const DBLP_BASE_PID = 'https://dblp.org/pid';
 const DBLP_BASE_PUB = 'https://dblp.dagstuhl.de/rec';
+
+const CONFERENCE_TYPE = 'conference';
+const JOURNAL_TYPE = 'journal';
+const INFORMAL_TYPE = 'informal';
 
 const FORBIDDEN_CHAR_REPLACEMENT = {
 	'/': '⁄',
@@ -38,17 +42,14 @@ const parseXml = async (xmlString: xml2js.convertableToString) => {
 	return new Promise((resolve, reject) => {
 		xml2js.parseString(xmlString, { ignoreAttrs: false, explicitArray: false },
 			(err, result) => {
-				if (err) {
-					reject(err);
-				} else {
-					resolve(result);
-				}
+				if (err) { reject(err);	}
+				else { resolve(result); }
 			}
 		);
 	});
 };
 
-const trimName = (name: string) => name.replaceAll(/[0-9]/g, '').trim();
+// const trimName = (name: string) => name.replaceAll(/[0-9]/g, '').trim();
 
 const sanitize = (fileName: string) => {
 	if (typeof fileName !== 'string'){
@@ -106,35 +107,76 @@ export default class DblpFetchPlugin extends Plugin {
 			await this.app.vault.create(path, content);
 			return true;
 		} catch(e) {
-			console.log(e);
-			console.log(path);
+			// console.log(e);
+			// console.log(path);
 			return false;
 		}
 	}
 
-	private async createPublicationMdFiles(queued, existingPubs, path) {
+	private async createPublicationMdFiles(queued, type) {
 		for (const pub of queued) {
-			const title = sanitize(pub.title);
-			if (!existingPubs.has(title)) {
-				const citation = await requestUrl(`${DBLP_BASE_PUB}/${pub.$.key}.bib`).text;
-				let authors;
-				if (pub.author.length) {
-					authors = pub.author.map(author => `author:: [[${trimName(author._)}]]`);
-				} else {
-					authors = [`author:: [[${trimName(pub.author._)}]]`]
+			const title: string = sanitize(pub.title);
+			const year: string = pub.year;
+			const key: string = pub.$.key.trim();
+
+			const citation = await requestUrl(`${DBLP_BASE_PUB}/${pub.$.key}.bib`).text;
+			let authors;
+			if (pub.author.length) {
+				authors = pub.author.map(author => `author:: [[${author._}]]`);
+			} else {
+				authors = [`author:: [[${pub.author._}]]`]
+			}
+			const content = `---\nkey: ${key}\n---\n\`\`\`bibtex\n${citation}\`\`\`\n${authors.join('\n')}`;
+
+			let path: string;
+			if (type === CONFERENCE_TYPE) {
+				const venue = pub.booktitle.replaceAll(/[^A-Z]/g, '');
+				
+				path = `${CONF_PAPER_DIR}/${venue}`;
+				try { await this.app.vault.createFolder(path); }
+				catch { /* empty */ }
+
+				path = `${path}/${year}`;
+				try { await this.app.vault.createFolder(path); }
+				catch { /* empty */ }
+			} else if (type === JOURNAL_TYPE) {
+				path = `${JOURNAL_PAPER_DIR}/${pub.journal}`;
+				try { await this.app.vault.createFolder(path); }
+				catch { /* empty */ }
+
+				path = `${path}/${year}`;
+				try { await this.app.vault.createFolder(path); }
+				catch { /* empty */ }
+			} else {
+				path = `${INFORMAL_PAPER_DIR}/${year}`;
+				try { await this.app.vault.createFolder(path); }
+				catch { /* empty */ }
+			}
+			
+			let created = await this.createFile(`${path}/${title}.md`, content);
+			let altTitle: string;
+
+			if (!created) {
+				const file: TFile | null = await this.app.vault.getFileByPath(`${path}/${title}.md`);
+				let fileKey: string;
+				if (file) {
+					const fileContents: string = await this.app.vault.read(file);
+					const frontMatterInfo: FrontMatterInfo = await getFrontMatterInfo(fileContents);
+					fileKey = frontMatterInfo.frontmatter.split(': ')[1].trim();
+					console.log(`fileKey: ${fileKey}`);
+					console.log(`key: ${key}`);
 				}
-				const content = `\`\`\`bibtex\n${citation}\`\`\`\n${authors.join('\n')}`;
-					
-				let created = await this.createFile(`${path}/${title}.md`, content);
-				if (!created) {
-					const altTitle = sanitize(`${title}(${pub.$.key})`);
+				if (key === fileKey) {
+					created = true;
+				} else {
+					altTitle = sanitize(`${title}(${key})`);
 					console.log(`ALT TITLE: ${altTitle}`);
 					created = await this.createFile(`${path}/${altTitle}.md`, content);
 				}
-				if (!created) {
-					console.log(`FAILED TO CREATE: ${path}/${title}.md AND ${path}/${altTitle}.md`);
-					console.log('MOVING ON...');
-				}
+			}
+			if (!created) {
+				console.log(`FAILED TO CREATE: ${path}/${title}.md AND ${path}/${altTitle}.md`);
+				console.log('MOVING ON...');
 			}
 		}
 	}
@@ -146,44 +188,39 @@ export default class DblpFetchPlugin extends Plugin {
 		const xmlData = await parseXml(response);
 		const dblpPerson = xmlData.dblpperson;
 
-		const existingConfPubs: Set<string> = new Set(
-			await this.app.vault.getFolderByPath(CONF_PAPER_DIR).children.map((file: TFile) => file.name.slice(0, -3))
-		);
-		const existingJournalPubs: Set<string> = new Set(
-			await this.app.vault.getFolderByPath(JOURNAL_PAPER_DIR).children.map((file: TFile) => file.name.slice(0, -3))
-		);
-		const existingInformalPubs: Set<string> = new Set(
-			await this.app.vault.getFolderByPath(INFORMAL_PAPER_DIR).children.map((file: TFile) => file.name.slice(0, -3))
-		);
-
 		const confPubs = dblpPerson.r
 			.filter(x => x.inproceedings)
 			.map(x => x.inproceedings);
+
 		const journalPubs = dblpPerson.r
 			.filter(x => x.article && !x.article.$.publtype)
 			.map(x => x.article);
+
 		const informalPubs = dblpPerson.r
 			.filter(x => x.article && x.article.$.publtype && x.article.$.publtype === 'informal')
 			.map(x => x.article);
 
-		await this.createPublicationMdFiles(confPubs, existingConfPubs, CONF_PAPER_DIR);
-		await this.createPublicationMdFiles(journalPubs, existingJournalPubs, JOURNAL_PAPER_DIR);
-		await this.createPublicationMdFiles(informalPubs, existingInformalPubs, INFORMAL_PAPER_DIR);
+		console.log(confPubs);
+		console.log(journalPubs);
+		console.log(informalPubs);
 
+		await this.createPublicationMdFiles(confPubs, CONFERENCE_TYPE);
+		await this.createPublicationMdFiles(journalPubs, JOURNAL_TYPE);
+		await this.createPublicationMdFiles(informalPubs, INFORMAL_TYPE);
 
 		// Process coauthors
 		const coauthors = dblpPerson.coauthors.co
 			.map(coauthor => {
 				if (coauthor.$.n) {
-					return { name: trimName(coauthor.na[0]._), pid: coauthor.na[0].$.pid };
+					return { name: coauthor.na[0]._, pid: coauthor.na[0].$.pid };
 				} else {
-					return { name: trimName(coauthor.na._), pid: coauthor.na.$.pid };
+					return { name: coauthor.na._, pid: coauthor.na.$.pid };
 				}
 			});
 
 
 		const existingPeople = new Set(
-			await this.app.vault.getFolderByPath(PEOPLE_DIR).children.map((file: TFile) => (file.name.slice(0, -3)))
+			await this.app.vault.getFolderByPath(PEOPLE_DIR).children.map((file: TFile) => file.name)
 		);
 
 		// Create/update coauthor files
