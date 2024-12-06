@@ -35,7 +35,8 @@ const FORBIDDEN_CHAR_REPLACEMENT = {
 	'{': '｛',
 	'}': '｝',
 	'[': '［',
-	']': '］'
+	']': '］',
+	'*': '＊'
 };
 
 const parseXml = async (xmlString: xml2js.convertableToString) => {
@@ -80,7 +81,7 @@ export default class DblpFetchPlugin extends Plugin {
 		this.addCommand({
 			id: 'dblp-fetch',
 			name: 'DBLP Fetch',
-			editorCheckCallback: (checking: boolean, editor: Editor, view: MarkdownView) => {
+			editorCheckCallback: async (checking: boolean, editor: Editor, view: MarkdownView) => {
 				const value: string = editor.getValue();
 				if (value) {
 					const dblpProperty: string | undefined = value
@@ -89,7 +90,9 @@ export default class DblpFetchPlugin extends Plugin {
 					if (dblpProperty) {
 						const dblpUrl = dblpProperty.substring(6).trim();
 						if (!checking) {
-							this.fetch(dblpUrl);
+							await this.fetch(dblpUrl);
+							const dateTime = new Date(Date.now());
+							await this.app.vault.process(view.file, (data: string) => data + `\n\nLast DBLP fetch: ${dateTime}`);
 						}
 						return true;
 					}
@@ -244,6 +247,7 @@ export default class DblpFetchPlugin extends Plugin {
 				await this.createFile(filePath, `---\ndblp: ${DBLP_BASE_PID}/${pid}\n---\n`);
 			}
 		}
+
 		console.log(`done fetching data from ${dblpUrl}`);
 		new Notice(`done fetching data from ${dblpUrl}`);
 	}
