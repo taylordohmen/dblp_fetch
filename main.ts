@@ -92,7 +92,13 @@ export default class DblpFetchPlugin extends Plugin {
 						if (!checking) {
 							await this.fetch(dblpUrl);
 							const dateTime = new Date(Date.now());
-							await this.app.vault.process(view.file, (data: string) => data + `\n\nLast DBLP fetch: ${dateTime}`);
+							await this.app.vault.process(view.file, (data: string) => {
+								const index = data.indexOf('Last DBLP fetch:');
+								if (index === -1) {
+									return `${data}\n\nLast DBLP fetch: ${dateTime}`;
+								}
+								return `${data.substring(0, index)}Last DBLP fetch: ${dateTime}`;	
+							});
 						}
 						return true;
 					}
