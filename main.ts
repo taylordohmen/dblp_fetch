@@ -208,15 +208,25 @@ export default class DblpFetchPlugin extends Plugin {
 		await this.createPublicationMdFiles(informalPubs, INFORMAL_TYPE);
 
 		// Process coauthors
-		const coauthors = dblpPerson.coauthors.co
-			.map(coauthor => {
-				if (coauthor.$.n) {
-					return { name: coauthor.na[0]._, pid: coauthor.na[0].$.pid };
-				} else {
-					return { name: coauthor.na._, pid: coauthor.na.$.pid };
+		let coauthors;
+		if (dblpPerson.coauthors.$.n > 1) {
+			coauthors = dblpPerson.coauthors.co.map(
+				coauthor => {
+					if (coauthor.$.n) {
+						return { name: coauthor.na[0]._, pid: coauthor.na[0].$.pid };
+					} else {
+						return { name: coauthor.na._, pid: coauthor.na.$.pid };
+					}
 				}
-			});
-
+			);
+		}
+		if (dblpPerson.coauthors.$.n == 1) {
+			if (dblpPerson.coauthors.co.$.n) {
+				coauthors = [ { name: dblpPerson.coauthors.co.na[0]._, pid: dblpPerson.coauthors.co.na[0].$.pid } ];
+			} else {
+				coauthors = [ { name: dblpPerson.coauthors.co.na._, pid: dblpPerson.coauthors.co.na.$.pid } ];
+			}
+		}
 
 		const existingPeople = new Set(
 			await this.app.vault.getFolderByPath(PEOPLE_DIR).children.map((file: TFile) => file.name)
