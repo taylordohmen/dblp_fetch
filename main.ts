@@ -254,7 +254,7 @@ export default class DblpFetchPlugin extends Plugin {
 			}
 		}
 
-		console.log(`done fetching data from ${dblpUrl}`);
+		// console.log(`done fetching data from ${dblpUrl}`);
 		new Notice(`done fetching data from ${dblpUrl}`);
 	}
 
