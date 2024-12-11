@@ -191,17 +191,23 @@ export default class DblpFetchPlugin extends Plugin {
 		const xmlData = await parseXml(response);
 		const dblpPerson = xmlData.dblpperson;
 
-		const confPubs = dblpPerson.r
-			.filter(x => x.inproceedings)
-			.map(x => x.inproceedings);
+		let pubs;
+		if (dblpPerson.$.n == 1) {
+			if (dblpPerson.r.inproceedings) {
+				pubs = [dblpPerson.r.inproceedings];
+			}
+			if (dblpPerson.r.article) {
+				pubs = [dblpPerson.r.article];
+			}
+		} else {
+			pubs = dblpPerson.r;
+		}
 
-		const journalPubs = dblpPerson.r
-			.filter(x => x.article && !x.article.$.publtype)
-			.map(x => x.article);
+		const confPubs = pubs.filter(x => x.inproceedings).map(x => x.inproceedings);
 
-		const informalPubs = dblpPerson.r
-			.filter(x => x.article && x.article.$.publtype && x.article.$.publtype === 'informal')
-			.map(x => x.article);
+		const journalPubs = pubs.filter(x => x.article && !x.article.$.publtype).map(x => x.article);
+
+		const informalPubs = pubs.filter(x => x.article && x.article.$.publtype && x.article.$.publtype === 'informal').map(x => x.article);
 
 		await this.createPublicationMdFiles(confPubs, CONFERENCE_TYPE);
 		await this.createPublicationMdFiles(journalPubs, JOURNAL_TYPE);
