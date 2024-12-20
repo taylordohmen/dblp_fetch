@@ -9,11 +9,14 @@ import {
 	TFile
 } from 'obsidian';
 import * as xml2js from 'xml2js';
+import Fuse from 'fuse.js';
+import FuzzySet from 'fuzzyset';
 
 const PEOPLE_DIR = 'People';
 const CONF_PAPER_DIR = 'Papers/Conference';
 const JOURNAL_PAPER_DIR = 'Papers/Journal';
 const INFORMAL_PAPER_DIR = 'Papers/Informal';
+const ORG_DIR = 'Organizations';
 
 const DBLP_BASE_PID = 'https://dblp.org/pid';
 const DBLP_BASE_PUB = 'https://dblp.dagstuhl.de/rec';
@@ -32,7 +35,7 @@ const FORBIDDEN_CHAR_REPLACEMENT = {
 	'#': '＃',
 	'?': '﹖',
 	'~': '～',
-	'$': '＄',
+	$: '＄',
 	'!': '！',
 	'&': '＆',
 	'@': '＠',
@@ -74,8 +77,9 @@ const sanitize = (fileName: string): string => {
 	return fileName;
 };
 
-const hasProperties = (lines: Array<string>): boolean =>
-	lines && lines.length > 0 && lines[0] === '---';
+const hasProperties = (lines: Array<string>): boolean => {
+	return lines && lines.length > 0 && lines[0] === '---';
+};
 
 const dblpExists = (lines: Array<string>): boolean => {
 	let i = 1;
@@ -86,6 +90,24 @@ const dblpExists = (lines: Array<string>): boolean => {
 		i++;
 	}
 	return false;
+};
+
+const sliceAtFirstComma = (text: string): string => {
+	const exceptionPrefix = 'University of California,'; 
+	if (text.startsWith(exceptionPrefix)) {
+		const suffix = text.slice(exceptionPrefix.length);
+		const index = suffix.indexOf(',');
+		if (index >= 0) {
+			return text.slice(0, exceptionPrefix.length + index);
+		}
+		return text;
+	}
+
+	const index = text.indexOf(',');
+	if (index >= 0) {
+		return text.slice(0, index);
+	}
+	return text;
 };
 
 // Main plugin class
@@ -103,15 +125,7 @@ export default class DblpFetchPlugin extends Plugin {
 					if (dblpProperty) {
 						const dblpUrl = dblpProperty.substring(6).trim();
 						if (!checking) {
-							await this.fetch(dblpUrl);
-							const dateTime = new Date(Date.now());
-							await this.app.vault.process(view.file, (data: string) => {
-								const index = data.indexOf('Last DBLP fetch:');
-								if (index === -1) {
-									return `${data}\n\nLast DBLP fetch: ${dateTime}`;
-								}
-								return `${data.substring(0, index)}Last DBLP fetch: ${dateTime}`;
-							});
+							await this.fetch(dblpUrl, view.file);
 						}
 						return true;
 					}
@@ -121,7 +135,7 @@ export default class DblpFetchPlugin extends Plugin {
 		});
 	}
 
-	private async createFile(path: string, content: string): void {
+	private async createFile(path: string, content: string): Promise<void> {
 		try {
 			await this.app.vault.create(path, content);
 			return true;
@@ -130,7 +144,7 @@ export default class DblpFetchPlugin extends Plugin {
 		}
 	}
 
-	private async createPublicationMdFiles(queued: Array<unknown>, type: string): void {
+	private async createPublicationMdFiles(queued: Array<unknown>, type: string): Promise<void> {
 		for (const pub of queued) {
 			const title: string = sanitize(pub.title);
 			const year: string = pub.year;
@@ -215,11 +229,56 @@ export default class DblpFetchPlugin extends Plugin {
 		}
 	}
 
-	private async fetch(dblpUrl: string): void {
-		// Fetch and parse XML data
-		const response: string = await requestUrl(`${dblpUrl}.xml`).text;
-		const xmlData = await parseXml(response);
-		const dblpPerson = xmlData.dblpperson;
+	private async getAffiliations(dblpPerson): Promise<Array<string>> {
+		const person = dblpPerson.person;
+		const dblpAffiliations = [];
+
+		if (person.note) {
+			if (person.note.length) {
+				dblpAffiliations.push(
+					...person.note
+						.filter((note) => note.$.type === 'affiliation' && !note.$.label)
+						.map((note) => sliceAtFirstComma(note._))
+				);
+			} else if (person.note.$.type === 'affiliation' && !person.note.$.label) {
+				dblpAffiliations.push(sliceAtFirstComma(person.note._));
+			}
+		}
+
+		const organizations = await this.app.vault
+			.getFolderByPath(ORG_DIR)
+			.children.map((file: TFile) => file.name.slice(0, -3));
+		
+		const fuzzyOrgs = FuzzySet(organizations);
+		const fuse = new Fuse(organizations, {
+			includeScore: true,
+			shouldSort: true
+		});
+		const affiliations = [];
+		for (const org of dblpAffiliations) {
+			const fuzzyResults = fuzzyOrgs.get(org);
+			const fuseResults = fuse.search(org);
+			let affil = org;
+
+			if (fuzzyResults && fuseResults) {
+				const [bestFuzzyScore, bestFuzzyItem] = fuzzyResults[0];
+				const {score, item, ...others} = fuseResults[0];
+				if (bestFuzzyItem === item && bestFuzzyScore >= 0.75 && score <= 0.33) {
+					affil = item;
+				} else {
+					await this.createFile(`${ORG_DIR}/${org}.md`, '');
+				}
+			} else {
+				await this.createFile(`${ORG_DIR}/${org}.md`, '');
+			}
+			
+			affiliations.push(affil);
+		}
+		return affiliations;
+	}
+
+	private async populatePublicationNotes(dblpPerson): Promise<void> {
+		new Notice('Creating publication notes...');
 
 		let pubs;
 		if (dblpPerson.$.n == 1) {
@@ -246,8 +305,11 @@ export default class DblpFetchPlugin extends Plugin {
 		await this.createPublicationMdFiles(confPubs, CONFERENCE_TYPE);
 		await this.createPublicationMdFiles(journalPubs, JOURNAL_TYPE);
 		await this.createPublicationMdFiles(informalPubs, INFORMAL_TYPE);
+	}
 
-		// Process coauthors
+	private async populateAuthorNotes(dblpPerson): Promise<void> {
+		new Notice('Creating author notes...');
+
 		let coauthors;
 		if (dblpPerson.coauthors.$.n > 1) {
 			coauthors = dblpPerson.coauthors.co.map((coauthor) => {
@@ -309,9 +371,29 @@ export default class DblpFetchPlugin extends Plugin {
 				await this.createFile(filePath, `---\ndblp: ${DBLP_BASE_PID}/${pid}\n---\n`);
 			}
 		}
+	}
 
-		// console.log(`done fetching data from ${dblpUrl}`);
-		new Notice(`done fetching data from ${dblpUrl}`);
+	private async fetch(dblpUrl: string, personFile: TFile): Promise<void> {
+		// Fetch and parse XML data
+		const response: string = await requestUrl(`${dblpUrl}.xml`).text;
+		const xmlData = await parseXml(response);
+		const dblpPerson = xmlData.dblpperson;
+
+		const affiliations = await this.getAffiliations(dblpPerson);
+		await this.populatePublicationNotes(dblpPerson);
+		await this.populateAuthorNotes(dblpPerson);
+
+		const dateTime = new Date(Date.now());
+		await this.app.vault.process(personFile, (data: string) => {
+			const newData = data
+				.split('\n')
+				.filter(line => !line.startsWith('Last DBLP fetch:'))
+				.filter(line => !line.startsWith('affiliation::'))
+				.concat(affiliations.map(affil => `affiliation:: [[${affil}]]`))
+				.join('\n');
+			return `${newData}\n\nLast DBLP fetch: ${dateTime}`.replaceAll(/\n(\n)+/g, '\n\n');
+		});
+		new Notice(`Done fetching data from ${dblpUrl}`);
 	}
 
 	async onunload() {}
