@@ -318,7 +318,7 @@ export default class DblpFetchPlugin extends Plugin {
 		new Notice('Creating author notes...');
 
 		let coauthors: Array<{ name: string, pid: string }> = [];
-		if (dblpPerson.coauthors.$.n > 1) {
+		if (dblpPerson.coauthors && dblpPerson.coauthors.$.n > 1) {
 			coauthors = dblpPerson.coauthors.co.map((coauthor): { name: string, pid: string } => {
 				if (coauthor.$.n) {
 					return { name: coauthor.na[0]._, pid: coauthor.na[0].$.pid };
@@ -327,7 +327,7 @@ export default class DblpFetchPlugin extends Plugin {
 				}
 			});
 		}
-		if (dblpPerson.coauthors.$.n == 1) {
+		if (dblpPerson.coauthors && dblpPerson.coauthors.$.n == 1) {
 			if (dblpPerson.coauthors.co.$.n) {
 				coauthors = [
 					{ name: dblpPerson.coauthors.co.na[0]._, pid: dblpPerson.coauthors.co.na[0].$.pid }
@@ -417,7 +417,6 @@ export default class DblpFetchPlugin extends Plugin {
 		const dateTime = new Date(Date.now());
 		await this.app.vault.process(personFile, (data: string): string => {
 			links = links.filter((link: string): boolean => !data.includes(link));
-			console.log(links);
 			const newData: string = data
 				.split('\n')
 				.toSpliced(1, 0, ...links)
