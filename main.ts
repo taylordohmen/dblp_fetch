@@ -394,13 +394,16 @@ export default class DblpFetchPlugin extends Plugin {
 		if (person.url) {
 			if (Array.isArray(person.url)) {
 				for (const url of person.url) {
-					this.processURL(links, url);
+					this.processURL(links, typeof url === 'string' ? url : url._);
 				}
 			} else {
-				this.processURL(links, person.url);
+				const url = person.url;
+				this.processURL(links, typeof url === 'string' ? url : url._);
 			}
 		}
-		return Object.entries(links).filter(([key, value]: [string ,string]): string => value).map(([key, value]: [string, string]): string => `${key}: ${value}`);
+		return Object.entries(links)
+			.filter(([, value]: [string, string]): string => value)
+			.map(([key, value]: [string, string]): string => `${key}: ${value}`);
 	}
 
 	private async fetch(dblpUrl: string, personFile: TFile): Promise<void> {
@@ -433,7 +436,7 @@ export default class DblpFetchPlugin extends Plugin {
 interface DblpPerson {
 	person: {
 		note?: Array<{ $: { type: string, label?: string }, _: string }> | { $: { type: string, label?: string }, _: string },
-		url?: Array<string> | string
+		url?: Array<string | { _: string }> | string | { _: string }
 	},
 	coauthors: {
 		$: { n: number },
