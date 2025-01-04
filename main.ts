@@ -263,7 +263,7 @@ export default class DblpFetchPlugin extends Plugin {
 				const fuseResults: Array<FuseResult<string>> = fuse.search(org);
 				let affil: string = org;
 
-				if (fuzzyResults && fuseResults) {
+				if (fuzzyResults && fuzzyResults.length && fuseResults && fuseResults.length) {
 					const [bestFuzzyScore, bestFuzzyItem] = fuzzyResults[0];
 					const { score, item } = fuseResults[0];
 
