@@ -1,8 +1,8 @@
 import {
-	Editor,
 	FrontMatterInfo,
 	getFrontMatterInfo,
 	MarkdownView,
+	normalizePath,
 	Notice,
 	Plugin,
 	requestUrl,
@@ -22,11 +22,118 @@ const ORG_DIR = 'Organizations';
 const DBLP_BASE_PID = 'https://dblp.org/pid';
 const DBLP_BASE_PUB = 'https://dblp.dagstuhl.de/rec';
 
-const CONFERENCE_TYPE = 'conference';
-const JOURNAL_TYPE = 'journal';
-const INFORMAL_TYPE = 'informal';
-
 const DBLP_PROPERTY = 'dblp';
+
+interface DblpNote {
+	$: {
+		type: string,
+		label?: string
+	},
+	_: string
+}
+
+interface Person {
+	note?: Array<DblpNote> | DblpNote,
+	url?: Array<string | { _: string }> | string | { _: string }
+}
+
+interface DblpPerson {
+	person: Person,
+	coauthors?: CoauthorList,
+	r: { inproceedings: InProceedings } | { article: Article } | Array<{ inproceedings: InProceedings } | { article: Article }>,
+	$: {
+		n: number,
+		name: string
+	}
+}
+
+interface CoauthorList {
+	$: { n: number },
+	co: Array<Coauthor> | Coauthor
+}
+
+interface Coauthor {
+	$: { n?: number },
+	na: Array<{ _: string, $: { pid: string } }> | { _: string, $: { pid: string } }
+}
+
+function getCoauthorName(coauthor: Coauthor): string {
+	if (Array.isArray(coauthor.na)) {
+		return coauthor.na[0]._;
+	} else {
+		return coauthor.na._;
+	}
+}
+
+function getCoauthorPid(coauthor: Coauthor): string {
+	if (Array.isArray(coauthor.na)) {
+		return coauthor.na[0].$.pid;
+	} else {
+		return coauthor.na.$.pid;
+	}
+}
+
+interface DblpPersonData {
+	dblpperson: DblpPerson
+}
+
+interface InProceedings {
+	title: string,
+	year: string,
+	$: { key: string },
+	author: Array<{ _: string }> | { _: string },
+	booktitle: string
+}
+
+function isInProceedings(x: Publication): x is InProceedings {
+	return 'booktitle' in x;
+}
+
+interface JournalArticle {
+	title: string,
+	year: string,
+	$: { key: string },
+	author: Array<{ _: string }> | { _: string },
+	journal: string
+}
+
+function isJournalArticle(x: Publication): x is JournalArticle {
+	return 'journal' in x && '$' in x && !('publtype' in x.$);
+}
+
+interface InformalArticle {
+	title: string,
+	year: string,
+	$: {
+		key: string,
+		publtype: string
+	},
+	author: Array<{ _: string }> | { _: string },
+	journal: string
+}
+
+function isInformalArticle(x: Publication): x is InformalArticle {
+	return 'journal' in x && '$' in x && 'publtype' in x.$;
+}
+
+type Publication = InProceedings | JournalArticle | InformalArticle;
+type Article = JournalArticle | InformalArticle;
+
+async function parseXml(xmlString: xml2js.convertableToString): Promise<unknown> {
+	return new Promise((resolve, reject): void => {
+		xml2js.parseString(
+			xmlString,
+			{ ignoreAttrs: false, explicitArray: false },
+			(err, result): void => {
+				if (err) {
+					reject(err);
+				} else {
+					resolve(result);
+				}
+			}
+		);
+	});
+}
 
 const FORBIDDEN_CHAR_REPLACEMENT = {
 	'/': '⁄',
@@ -54,30 +161,14 @@ const FORBIDDEN_CHAR_REPLACEMENT = {
 	'*': '＊'
 };
 
-async function parseXml(xmlString: xml2js.convertableToString): Promise<unknown> {
-	return new Promise((resolve, reject): void => {
-		xml2js.parseString(
-			xmlString,
-			{ ignoreAttrs: false, explicitArray: false },
-			(err, result): void => {
-				if (err) {
-					reject(err);
-				} else {
-					resolve(result);
-				}
-			}
-		);
-	});
-}
-
-function sanitize(fileName: string | { _: string; }): string {
+function sanitize(fileName: string | { _: string }): string {
 	if (typeof fileName !== 'string') {
 		fileName = fileName._;
 	}
 	for (const [key, value] of Object.entries(FORBIDDEN_CHAR_REPLACEMENT)) {
 		fileName = fileName.replaceAll(key, value);
 	}
-	return fileName;
+	return normalizePath(fileName);
 }
 
 function hasProperties(lines: Array<string>): boolean {
@@ -95,15 +186,21 @@ function exists(property: string, lines: Array<string>): boolean {
 	return false;
 }
 
+const EXCEPTION_PREFIXES: Array<string> = [
+	'University of California,'
+];
+
 function sliceAtFirstComma(text: string): string {
-	const exceptionPrefix = 'University of California,';
-	if (text.startsWith(exceptionPrefix)) {
-		const suffix: string = text.slice(exceptionPrefix.length);
-		const index: number = suffix.indexOf(',');
-		if (index >= 0) {
-			return text.slice(0, exceptionPrefix.length + index);
+
+	for (const exceptionPrefix of EXCEPTION_PREFIXES) {
+		if (text.startsWith(exceptionPrefix)) {
+			const suffix: string = text.slice(exceptionPrefix.length);
+			const index: number = suffix.indexOf(',');
+			if (index >= 0) {
+				return text.slice(0, exceptionPrefix.length + index);
+			}
+			return text;
 		}
-		return text;
 	}
 
 	const index: number = text.indexOf(',');
@@ -120,12 +217,13 @@ export default class DblpFetchPlugin extends Plugin {
 		this.addCommand({
 			id: 'dblp-fetch',
 			name: 'DBLP Fetch',
-			editorCheckCallback: (checking: boolean, editor: Editor, view: MarkdownView): boolean => {
-				const value: string = editor.getValue();
-				if (value) {
-					const dblpProperty: string | undefined = value
-						.split('\n')
-						.find((line: string): boolean => line.startsWith('dblp: '));
+			checkCallback: (checking: boolean): boolean => {
+				const view: MarkdownView | null = this.app.workspace.getActiveViewOfType(MarkdownView);
+				if (view) {
+					const mdContent: string = view.getViewData();
+					const dblpProperty: string | undefined = mdContent.split('\n').find(
+						(line: string): boolean => line.startsWith(`${DBLP_PROPERTY}: `)
+					);
 					if (dblpProperty) {
 						const dblpUrl: string = dblpProperty.substring(6).trim();
 						if (!checking && view.file) {
@@ -150,7 +248,7 @@ export default class DblpFetchPlugin extends Plugin {
 		}
 	}
 
-	private async createPublicationMdFiles(queued: Array<Publication>, type: string): Promise<void> {
+	private async createPublicationMdFiles(queued: Array<Publication>): Promise<void> {
 
 		for (const pub of queued) {
 			const title: string = sanitize(pub.title);
@@ -160,82 +258,148 @@ export default class DblpFetchPlugin extends Plugin {
 			const citation: string = await requestUrl(`${DBLP_BASE_PUB}/${pub.$.key}.bib`).text;
 			let authors: Array<string>;
 			if (Array.isArray(pub.author)) {
-				authors = pub.author.map((author: { _: string; }): string => `author:: [[${author._}]]`);
+				authors = pub.author.map(
+					(author: { _: string }): string => `author:: [[${author._}]]`
+				);
 			} else {
 				authors = [`author:: [[${pub.author._}]]`];
 			}
 			const content = `---\nkey: ${key}\n---\n\`\`\`bibtex\n${citation}\`\`\`\n${authors.join('\n')}`;
 
-			let path: string;
-			if (type === CONFERENCE_TYPE) {
-				const venue: string | undefined = pub.booktitle?.replaceAll(/[^A-Z]/g, '');
-
+			let path = '';
+			if (isInProceedings(pub)) {
+				const venue: string = pub.booktitle.replaceAll(/[^A-Z]/g, '');
 				path = `${CONF_PAPER_DIR}/${venue}`;
 				try {
 					await this.app.vault.createFolder(path);
-				} catch {
-					/* empty */
-				}
-
+				} catch { /* empty */ }
 				path = `${path}/${year}`;
 				try {
 					await this.app.vault.createFolder(path);
-				} catch {
-					/* empty */
-				}
-			} else if (type === JOURNAL_TYPE) {
+				} catch { /* empty */ }
+			} else if (isJournalArticle(pub)) {
 				path = `${JOURNAL_PAPER_DIR}/${pub.journal}`;
 				try {
 					await this.app.vault.createFolder(path);
-				} catch {
-					/* empty */
-				}
-
+				} catch { /* empty */ }
 				path = `${path}/${year}`;
 				try {
 					await this.app.vault.createFolder(path);
-				} catch {
-					/* empty */
-				}
-			} else {
+				} catch { /* empty */ }
+			} else if (isInformalArticle(pub)) {
 				path = `${INFORMAL_PAPER_DIR}/${year}`;
 				try {
 					await this.app.vault.createFolder(path);
-				} catch {
-					/* empty */
-				}
+				} catch { /* empty */ }
 			}
 
-			let created: boolean = await this.createFile(`${path}/${title}.md`, content);
-			let altTitle: string | undefined;
+			let filePath = `${path}/${title}.md`;
+			let created: boolean = await this.createFile(filePath, content);
 
 			if (!created) {
-				const file: TFile | null = this.app.vault.getFileByPath(
-					`${path}/${title}.md`
-				);
+				const file: TFile | null = this.app.vault.getFileByPath(filePath);
 				let fileKey: string | undefined;
 				if (file) {
-					const fileContents: string = await this.app.vault.read(file);
+					const fileContents: string = await this.app.vault.cachedRead(file);
 					const frontMatterInfo: FrontMatterInfo = getFrontMatterInfo(fileContents);
 					fileKey = frontMatterInfo.frontmatter.split(': ')[1].trim();
+
+					if (key !== fileKey) {
+						const altTitle: string = sanitize(`${title}(${key})`);
+						filePath = sanitize(`${path}/${altTitle}.md`);
+						created = await this.createFile(filePath, content);
+						if (!created) {
+							console.log(`FAILED TO CREATE: ${path}/${title}.md AND ${path}/${title}(${key}).md...\nMOVING ON...`);
+						}
+					}
 				}
-				if (key === fileKey) {
-					created = true;
-				} else {
-					altTitle = sanitize(`${title}(${key})`);
-					console.log(`ALT TITLE: ${altTitle}`);
-					created = await this.createFile(`${path}/${altTitle}.md`, content);
-				}
-			}
-			if (!created) {
-				console.log(`FAILED TO CREATE: ${path}/${title}.md AND ${path}/${altTitle}.md`);
-				console.log('MOVING ON...');
 			}
 		}
 	}
 
-	private async getAffiliations(dblpPerson): Promise<Array<string>> {
-		const person = dblpPerson.person;
+	private async populatePublicationNotes(dblpPerson: DblpPerson): Promise<void> {
+		new Notice('Creating publication notes...');
+
+		let pubs: Array<Publication> = [];
+		if (dblpPerson.$.n == 1) {
+			if ('inproceedings' in dblpPerson.r) {
+				pubs = [dblpPerson.r.inproceedings as Publication];
+			}
+			if ('article' in dblpPerson.r) {
+				pubs = [dblpPerson.r.article as Publication];
+			}
+		} else if (Array.isArray(dblpPerson.r)) {
+			pubs = dblpPerson.r.map(
+				(pub: { inproceedings: InProceedings, article: Article }): Publication => (
+					('inproceedings' in pub && pub.inproceedings) || ('article' in pub && pub.article)
+				) as Publication
+			);
+		}
+
+		this.createPublicationMdFiles(pubs);
+	}
+
+	private async populateAuthorNotes(dblpPerson: DblpPerson): Promise<void> {
+		new Notice('Creating author notes...');
+
+		let coauthors: Array<{ name: string, pid: string }> = [];
+		if (dblpPerson.coauthors) {
+			const co: Coauthor | Array<Coauthor> = dblpPerson.coauthors.co;
+			if (Array.isArray(co)) {
+				coauthors = co.map(
+					(coauthor: Coauthor): { name: string, pid: string } => ({
+						name: getCoauthorName(coauthor),
+						pid: getCoauthorPid(coauthor)
+					})
+				);
+			} else {
+				coauthors = [{
+					name: getCoauthorName(co),
+					pid: getCoauthorPid(co)
+				}];
+			}
+		}
+
+		const existingPeople = new Set(
+			this.app.vault.getFolderByPath(PEOPLE_DIR)?.children.map(
+				(file: TFile): string => file.name
+			)
+		);
+
+		// Create/update coauthor files
+		for (const coauthor of coauthors) {
+			const { name, pid } = coauthor;
+			const filePath = `${PEOPLE_DIR}/${name}.md`;
+			if (existingPeople.has(name)) {
+				const file: TFile | null = this.app.vault.getFileByPath(filePath);
+				if (file) {
+					await this.app.vault.process(file, (content: string): string => {
+						let newContent: Array<string> = content.split('\n');
+						if (newContent.length > 0) {
+							if (hasProperties(newContent) && !exists(DBLP_PROPERTY, newContent)) {
+								newContent.splice(1, 0, `dblp: ${DBLP_BASE_PID}/${pid}`);
+							} else if (!hasProperties(newContent)) {
+								newContent = [
+									'---',
+									`dblp: ${DBLP_BASE_PID}/${pid}`,
+									'---',
+									...content
+								];
+							}
+							return newContent.join('\n');
+						} else {
+							return `---\ndblp: ${DBLP_BASE_PID}/${pid}\n---\n`;
+						}
+					});
+				}
+			} else {
+				await this.createFile(filePath, `---\ndblp: ${DBLP_BASE_PID}/${pid}\n---\n`);
+			}
+		}
+	}
+
+	private async getAffiliations(dblpPerson: DblpPerson): Promise<Array<string>> {
+		const person: Person = dblpPerson.person;
 		const dblpAffiliations: Array<string> = [];
 		const affiliations: Array<string> = [];
 
@@ -243,9 +407,9 @@ export default class DblpFetchPlugin extends Plugin {
 			if (Array.isArray(person.note)) {
 				dblpAffiliations.push(
 					...person.note.filter(
-						(note): boolean => note.$.type === 'affiliation' && !note.$.label
+						(note: DblpNote): boolean => note.$.type === 'affiliation' && !note.$.label
 					).map(
-						(note): string => sliceAtFirstComma(note._)
+						(note: DblpNote): string => sliceAtFirstComma(note._)
 					)
 				);
 			} else if (person.note.$.type === 'affiliation' && !person.note.$.label) {
@@ -316,102 +480,6 @@ export default class DblpFetchPlugin extends Plugin {
 		return affiliations;
 	}
 
-	private async populatePublicationNotes(dblpPerson): Promise<void> {
-		new Notice('Creating publication notes...');
-
-		let pubs;
-		if (dblpPerson.$.n == 1) {
-			if (dblpPerson.r.inproceedings) {
-				pubs = [dblpPerson.r.inproceedings];
-			}
-			if (dblpPerson.r.article) {
-				pubs = [dblpPerson.r.article];
-			}
-		} else {
-			pubs = dblpPerson.r;
-		}
-
-		const confPubs = pubs
-			.filter((x) => x.inproceedings)
-			.map((x) => x.inproceedings);
-
-		const journalPubs = pubs
-			.filter((x) => x.article && !x.article.$.publtype)
-			.map((x) => x.article);
-
-		const informalPubs = pubs
-			.filter((x) => x.article && x.article.$.publtype && x.article.$.publtype === 'informal')
-			.map((x) => x.article);
-
-		await this.createPublicationMdFiles(confPubs, CONFERENCE_TYPE);
-		await this.createPublicationMdFiles(journalPubs, JOURNAL_TYPE);
-		await this.createPublicationMdFiles(informalPubs, INFORMAL_TYPE);
-	}
-
-	private async populateAuthorNotes(dblpPerson): Promise<void> {
-		new Notice('Creating author notes...');
-
-		let coauthors: Array<{ name: string, pid: string }> = [];
-		if (dblpPerson.coauthors && dblpPerson.coauthors.$.n > 1) {
-			coauthors = dblpPerson.coauthors.co.map((coauthor): { name: string, pid: string } => {
-				if (coauthor.$.n) {
-					return { name: coauthor.na[0]._, pid: coauthor.na[0].$.pid };
-				} else {
-					return { name: coauthor.na._, pid: coauthor.na.$.pid };
-				}
-			});
-		}
-		if (dblpPerson.coauthors && dblpPerson.coauthors.$.n == 1) {
-			if (dblpPerson.coauthors.co.$.n) {
-				coauthors = [
-					{ name: dblpPerson.coauthors.co.na[0]._, pid: dblpPerson.coauthors.co.na[0].$.pid }
-				];
-			} else {
-				coauthors = [
-					{ name: dblpPerson.coauthors.co.na._, pid: dblpPerson.coauthors.co.na.$.pid }
-				];
-			}
-		}
-
-		const existingPeople = new Set(
-			this.app.vault.getFolderByPath(PEOPLE_DIR)?.children.map((file: TFile): string => file.name)
-		);
-
-		// Create/update coauthor files
-		for (const coauthor of coauthors) {
-			const { name, pid } = coauthor;
-			const filePath = `${PEOPLE_DIR}/${name}.md`;
-
-			if (existingPeople.has(name)) {
-				const file: TFile | null = this.app.vault.getFileByPath(filePath);
-
-				if (file) {
-
-					await this.app.vault.process(file, (content: string): string => {
-						let newContent: Array<string> = content.split('\n');
-						if (newContent.length > 0) {
-							if (hasProperties(newContent) && !exists(DBLP_PROPERTY, newContent)) {
-								newContent.splice(1, 0, `dblp: ${DBLP_BASE_PID}/${pid}`);
-							} else if (!hasProperties(newContent)) {
-								newContent = [
-									'---',
-									`dblp: ${DBLP_BASE_PID}/${pid}`,
-									'---',
-									...content
-								];
-							}
-							return newContent.join('\n');
-						} else {
-							return `---\ndblp: ${DBLP_BASE_PID}/${pid}\n---\n`;
-						}
-					});
-				}
-			} else {
-				await this.createFile(filePath, `---\ndblp: ${DBLP_BASE_PID}/${pid}\n---\n`);
-			}
-		}
-	}
-
 	private processURL(links: { orcid: string; wikipedia: string; mgp: string; }, url: string): void {
 		if (url.includes('orcid.org')) {
 			links.orcid = url;
@@ -422,22 +490,24 @@ export default class DblpFetchPlugin extends Plugin {
 		}
 	}
 
-	private async getLinks(dblpPerson: DblpPerson): Promise<Array<string>> {
+	private getLinks(dblpPerson: DblpPerson): Array<string> {
 		const links = { orcid: '', wikipedia: '', mgp: '' };
-		const person = dblpPerson.person;
+		const person: Person = dblpPerson.person;
 		if (person.url) {
 			if (Array.isArray(person.url)) {
 				for (const url of person.url) {
 					this.processURL(links, typeof url === 'string' ? url : url._);
 				}
 			} else {
-				const url = person.url;
+				const url: string | { _: string } = person.url;
 				this.processURL(links, typeof url === 'string' ? url : url._);
 			}
 		}
-		return Object.entries(links)
-			.filter(([, value]: [string, string]): string => value)
-			.map(([key, value]: [string, string]): string => `${key}: ${value}`);
+		return Object.entries(links).filter(
+			([, value]: [string, string]): string => value
+		).map(
+			([key, value]: [string, string]): string => `${key}: ${value}`
+		);
 	}
 
 	private async fetch(dblpUrl: string, personFile: TFile): Promise<void> {
@@ -445,67 +515,33 @@ export default class DblpFetchPlugin extends Plugin {
 		const response: string = await requestUrl(`${dblpUrl}.xml`).text;
 		const xmlData: DblpPersonData = await parseXml(response) as DblpPersonData;
 		const dblpPerson: DblpPerson = xmlData.dblpperson;
+		const name: string = dblpPerson.$.name;
+
+
+		await this.populatePublicationNotes(dblpPerson);
+		new Notice(`Done creating publication notes for ${name}.`);
+
+		await this.populateAuthorNotes(dblpPerson);
+		new Notice(`Done creating co-author notes for ${name}.`);
 
 		const affiliations: Array<string> = await this.getAffiliations(dblpPerson);
-		let links: Array<string> = await this.getLinks(dblpPerson);
-		await this.populatePublicationNotes(dblpPerson);
-		await this.populateAuthorNotes(dblpPerson);
-
+		let links: Array<string> = this.getLinks(dblpPerson);
 		const dateTime = new Date(Date.now());
+
 		await this.app.vault.process(personFile, (data: string): string => {
 			links = links.filter((link: string): boolean => !data.includes(link));
 			const newData: string = data
 				.split('\n')
 				.toSpliced(1, 0, ...links)
-				.filter((line: string): boolean => !line.startsWith('Last DBLP fetch:'))
-				.filter((line: string): boolean => !line.startsWith('affiliation::'))
-				.concat(affiliations.map((affil: string): string => `affiliation:: [[${affil}]]`))
-				.join('\n');
+				.filter(
+					(line: string): boolean => !line.startsWith('Last DBLP fetch:') && !line.startsWith('affiliation::')
+				).concat(
+					affiliations.map((affil: string): string => `affiliation:: [[${affil}]]`)
+				).join('\n');
 			return `${newData}\n\nLast DBLP fetch: ${dateTime}`.replaceAll(/\n(\n)+/g, '\n\n');
 		});
-		new Notice(`Done fetching data from ${dblpUrl}`);
+
+		new Notice(`Done fetching DBLP data for ${name} from ${dblpUrl}.`);
 	}
 }
 
-interface DblpPerson {
-	person: {
-		note?: Array<{ $: { type: string, label?: string }, _: string }> | { $: { type: string, label?: string }, _: string },
-		url?: Array<string | { _: string }> | string | { _: string }
-	},
-	coauthors: {
-		$: { n: number },
-		co: Array<{
-			na: Array<{ _: string, $: { pid: string } }> | { _: string, $: { pid: string } }
-		}>
-	},
-	r: Array<{
-		inproceedings?: {
-			title: string,
-			year: string,
-			$: { key: string },
-			author: Array<{ _: string }> | { _: string },
-			booktitle: string
-		}
-		article?: {
-			title: string,
-			year: string,
-			$: { key: string, publtype?: string },
-			author: Array<{ _: string }> | { _: string },
-			journal: string
-		}
-	}>,
-	$: { n: number }
-}
-
-interface DblpPersonData {
-	dblpperson: DblpPerson
-}
-
-interface Publication {
-	title: string,
-	year: string,
-	$: { key: string },
-	author: Array<{ _: string }> | { _: string },
-	booktitle?: string,
-	journal?: string
-}
