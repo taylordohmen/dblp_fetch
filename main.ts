@@ -25,6 +25,8 @@ const CONFERENCE_TYPE = 'conference';
 const JOURNAL_TYPE = 'journal';
 const INFORMAL_TYPE = 'informal';
 
+const DBLP_PROPERTY = 'dblp';
+
 const FORBIDDEN_CHAR_REPLACEMENT = {
 	'/': '⁄',
 	'\\': '＼',
@@ -81,10 +83,10 @@ function hasProperties(lines: Array<string>): boolean {
 	return lines && lines.length > 0 && lines[0] === '---';
 }
 
-function dblpExists(lines: Array<string>): boolean {
+function exists(property: string, lines: Array<string>): boolean {
 	let i = 1;
 	while (lines[i] !== '---') {
-		if (lines[i].startsWith('dblp: ')) {
+		if (lines[i].startsWith(`${property}:`)) {
 			return true;
 		}
 		i++;
@@ -239,21 +241,46 @@ export default class DblpFetchPlugin extends Plugin {
 		if (person.note) {
 			if (Array.isArray(person.note)) {
 				dblpAffiliations.push(
-					...person.note
-						.filter((note): boolean => note.$.type === 'affiliation' && !note.$.label)
-						.map((note): string => sliceAtFirstComma(note._))
+					...person.note.filter(
+						(note): boolean => note.$.type === 'affiliation' && !note.$.label
+					).map(
+						(note): string => sliceAtFirstComma(note._)
+					)
 				);
 			} else if (person.note.$.type === 'affiliation' && !person.note.$.label) {
 				dblpAffiliations.push(sliceAtFirstComma(person.note._));
 			}
 
-			const organizations: Array<string> = this.app.vault
-				.getFolderByPath(ORG_DIR)?.children
-				.map((file: TFile): string => file.name.slice(0, -3))
-				|| [];
+			const organizations: Array<[string, string]> = this.app.vault.getFolderByPath(ORG_DIR)?.children.map(
+				(file: TFile): [string, string] => [file.basename, file.basename]
+			) || [];
 
-			const fuzzyOrgs: FuzzySet = FuzzySet(organizations);
-			const fuse = new Fuse(organizations, {
+			const orgs: Map<string, string> = new Map(organizations);
+			for (const org of orgs.keys()) {
+				const file: TFile | null = this.app.vault.getFileByPath(`${ORG_DIR}/${org}.md`);
+				if (file) {
+					const fileContents: string = await this.app.vault.cachedRead(file);
+					const frontMatterInfo: FrontMatterInfo = getFrontMatterInfo(fileContents);
+					if (frontMatterInfo.exists) {
+						const aliases: Array<string> = frontMatterInfo.frontmatter.split('\n').map(
+							(line: string): string => line.trim()
+						).filter(
+							(line: string): boolean => line.startsWith('-')
+						).map(
+							(line: string): string => line.slice(1).trim()
+						);
+						if (aliases) {
+							aliases.forEach((alias: string): void => {
+								orgs.set(alias, org);
+							});
+						}
+					}
+					
+				}
+			}			
+
+			const fuzzyOrgs: FuzzySet = FuzzySet([...orgs.keys()]);
+			const fuse = new Fuse([...orgs.keys()], {
 				includeScore: true,
 				shouldSort: true
 			});
@@ -263,12 +290,18 @@ export default class DblpFetchPlugin extends Plugin {
 				const fuseResults: Array<FuseResult<string>> = fuse.search(org);
 				let affil: string = org;
 
+				// console.log(`FuzzyOrgs: ${fuzzyResults}`);
+				// console.log(`Fuse: ${fuseResults.map(result => result.item)}`);
+
 				if (fuzzyResults && fuzzyResults.length && fuseResults && fuseResults.length) {
 					const [bestFuzzyScore, bestFuzzyItem] = fuzzyResults[0];
 					const { score, item } = fuseResults[0];
 
-					if (bestFuzzyItem === item && bestFuzzyScore >= 0.75 && score && score <= 0.33) {
-						affil = item;
+					// console.log(`Fuzzy: ${bestFuzzyItem} ${bestFuzzyScore}`);
+					// console.log(`Fuse: ${item} ${score}`);
+
+					if (bestFuzzyItem === item && bestFuzzyScore >= 0.75 && score !== undefined && score <= 0.33) {
+						affil = orgs.get(item) || affil;
 					} else {
 						await this.createFile(`${ORG_DIR}/${org}.md`, '');
 					}
@@ -356,7 +389,7 @@ export default class DblpFetchPlugin extends Plugin {
 					await this.app.vault.process(file, (content: string): string => {
 						let newContent: Array<string> = content.split('\n');
 						if (newContent.length > 0) {
-							if (hasProperties(newContent) && !dblpExists(newContent)) {
+							if (hasProperties(newContent) && !exists(DBLP_PROPERTY, newContent)) {
 								newContent.splice(1, 0, `dblp: ${DBLP_BASE_PID}/${pid}`);
 							} else if (!hasProperties(newContent)) {
 								newContent = [
