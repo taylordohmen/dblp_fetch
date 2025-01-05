@@ -6,7 +6,8 @@ import {
 	Notice,
 	Plugin,
 	requestUrl,
-	TFile
+	TFile,
+	type TAbstractFile
 } from 'obsidian';
 import * as xml2js from 'xml2js';
 import Fuse, { type FuseResult } from 'fuse.js';
@@ -251,36 +252,36 @@ export default class DblpFetchPlugin extends Plugin {
 				dblpAffiliations.push(sliceAtFirstComma(person.note._));
 			}
 
-			const organizations: Array<[string, string]> = this.app.vault.getFolderByPath(ORG_DIR)?.children.map(
-				(file: TFile): [string, string] => [file.basename, file.basename]
-			) || [];
+			const orgFiles: Array<TFile> = (this.app.vault.getFolderByPath(ORG_DIR)?.children || []).filter(
+				(file: TAbstractFile): file is TFile => file instanceof TFile
+			);
 
-			const orgs: Map<string, string> = new Map(organizations);
-			for (const org of orgs.keys()) {
-				const file: TFile | null = this.app.vault.getFileByPath(`${ORG_DIR}/${org}.md`);
-				if (file) {
-					const fileContents: string = await this.app.vault.cachedRead(file);
-					const frontMatterInfo: FrontMatterInfo = getFrontMatterInfo(fileContents);
-					if (frontMatterInfo.exists) {
-						const aliases: Array<string> = frontMatterInfo.frontmatter.split('\n').map(
-							(line: string): string => line.trim()
-						).filter(
-							(line: string): boolean => line.startsWith('-')
-						).map(
-							(line: string): string => line.slice(1).trim()
-						);
-						if (aliases) {
-							aliases.forEach((alias: string): void => {
-								orgs.set(alias, org);
-							});
-						}
+			const organizations: Map<string, string> = new Map(
+				orgFiles.map((file: TFile): [string, string] => [file.basename, file.basename]) || []
+			);
+
+			for (const orgFile of orgFiles) {
+				const org: string = orgFile.basename;
+				const fileContents: string = await this.app.vault.cachedRead(orgFile);
+				const frontMatterInfo: FrontMatterInfo = getFrontMatterInfo(fileContents);
+				if (frontMatterInfo.exists) {
+					const aliases: Array<string> = frontMatterInfo.frontmatter.split('\n').map(
+						(line: string): string => line.trim()
+					).filter(
+						(line: string): boolean => line.startsWith('-')
+					).map(
+						(line: string): string => line.slice(1).trim()
+					);
+					if (aliases) {
+						aliases.forEach((alias: string): void => {
+							organizations.set(alias, org);
+						});
 					}
-					
 				}
-			}			
+			}
 
-			const fuzzyOrgs: FuzzySet = FuzzySet([...orgs.keys()]);
-			const fuse = new Fuse([...orgs.keys()], {
+			const fuzzyOrgs: FuzzySet = FuzzySet([...organizations.keys()]);
+			const fuse = new Fuse([...organizations.keys()], {
 				includeScore: true,
 				shouldSort: true
 			});
@@ -301,7 +302,7 @@ export default class DblpFetchPlugin extends Plugin {
 					// console.log(`Fuse: ${item} ${score}`);
 
 					if (bestFuzzyItem === item && bestFuzzyScore >= 0.75 && score !== undefined && score <= 0.33) {
-						affil = orgs.get(item) || affil;
+						affil = organizations.get(item) || affil;
 					} else {
 						await this.createFile(`${ORG_DIR}/${org}.md`, '');
 					}
@@ -315,7 +316,7 @@ export default class DblpFetchPlugin extends Plugin {
 		return affiliations;
 	}
 
-	private async populatePublicationNotes(dblpPerson: any): Promise<void> {
+	private async populatePublicationNotes(dblpPerson): Promise<void> {
 		new Notice('Creating publication notes...');
 
 		let pubs;
@@ -457,7 +458,7 @@ export default class DblpFetchPlugin extends Plugin {
 				.split('\n')
 				.toSpliced(1, 0, ...links)
 				.filter((line: string): boolean => !line.startsWith('Last DBLP fetch:'))
-				.filter((line:string): boolean => !line.startsWith('affiliation::'))
+				.filter((line: string): boolean => !line.startsWith('affiliation::'))
 				.concat(affiliations.map((affil: string): string => `affiliation:: [[${affil}]]`))
 				.join('\n');
 			return `${newData}\n\nLast DBLP fetch: ${dateTime}`.replaceAll(/\n(\n)+/g, '\n\n');
@@ -474,7 +475,7 @@ interface DblpPerson {
 	coauthors: {
 		$: { n: number },
 		co: Array<{
-			na: Array<{ _: string,$: { pid: string } }> | { _: string, $: { pid: string } }
+			na: Array<{ _: string, $: { pid: string } }> | { _: string, $: { pid: string } }
 		}>
 	},
 	r: Array<{
@@ -483,14 +484,15 @@ interface DblpPerson {
 			year: string,
 			$: { key: string },
 			author: Array<{ _: string }> | { _: string },
-			booktitle: string 
+			booktitle: string
 		}
 		article?: {
 			title: string,
 			year: string,
 			$: { key: string, publtype?: string },
 			author: Array<{ _: string }> | { _: string },
-			journal: string }
+			journal: string
+		}
 	}>,
 	$: { n: number }
 }
