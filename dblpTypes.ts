@@ -67,7 +67,7 @@ export type Article = JournalArticle | InformalArticle;
 export type Publication = InProceedings | JournalArticle | InformalArticle;
 
 export function isInProceedings(x: Publication): x is InProceedings {
-    return 'booktitle' in x;
+    return 'booktitle' in x && '$' in x && !('publtype' in x.$);
 }
 
 export function isJournalArticle(x: Publication): x is JournalArticle {

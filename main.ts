@@ -105,6 +105,9 @@ export default class DblpFetchPlugin extends Plugin {
 	}
 
 	private async createPublicationMdFiles(queued: Array<Publication>): Promise<void> {
+		queued = queued.filter(
+			(pub: Publication): boolean => isInProceedings(pub) || isJournalArticle(pub) || isInformalArticle(pub)
+		);
 		for (const pub of queued) {
 			const title: string = sanitize(pub.title);
 			const year: string = pub.year;
@@ -184,8 +187,9 @@ export default class DblpFetchPlugin extends Plugin {
 				pubs = [dblpPerson.r.article as Publication];
 			}
 		} else if (Array.isArray(dblpPerson.r)) {
-			pubs = dblpPerson.r.map(
-				(pub: { inproceedings: InProceedings, article: Article }): Publication => (
+			pubs = dblpPerson.r.filter(
+				(pub: { inproceedings: InProceedings, article: Article }): boolean => 'inproceedings' in pub || 'article' in pub
+			).map((pub: { inproceedings: InProceedings, article: Article }): Publication => (
 					('inproceedings' in pub && pub.inproceedings) || ('article' in pub && pub.article)
 				) as Publication
 			);
