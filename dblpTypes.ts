@@ -18,7 +18,7 @@ export interface Person {
 }
 
 export interface DblpNote {
-    $: {
+    $?: {
         type: string,
         label?: string
     },

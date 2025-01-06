@@ -190,8 +190,8 @@ export default class DblpFetchPlugin extends Plugin {
 			pubs = dblpPerson.r.filter(
 				(pub: { inproceedings: InProceedings, article: Article }): boolean => 'inproceedings' in pub || 'article' in pub
 			).map((pub: { inproceedings: InProceedings, article: Article }): Publication => (
-					('inproceedings' in pub && pub.inproceedings) || ('article' in pub && pub.article)
-				) as Publication
+				('inproceedings' in pub && pub.inproceedings) || ('article' in pub && pub.article)
+			) as Publication
 			);
 		}
 
@@ -266,12 +266,12 @@ export default class DblpFetchPlugin extends Plugin {
 			if (Array.isArray(person.note)) {
 				dblpAffiliations.push(
 					...person.note.filter(
-						(note: DblpNote): boolean => note.$.type === 'affiliation' && !note.$.label
+						(note: DblpNote): boolean => note.$ !== undefined && note.$.type === 'affiliation' && !note.$.label
 					).map(
 						(note: DblpNote): string => sliceAtFirstComma(note._)
 					)
 				);
-			} else if (person.note.$.type === 'affiliation' && !person.note.$.label) {
+			} else if (person.note.$ !== undefined && person.note.$.type === 'affiliation' && !person.note.$.label) {
 				dblpAffiliations.push(sliceAtFirstComma(person.note._));
 			}
 
@@ -338,7 +338,7 @@ export default class DblpFetchPlugin extends Plugin {
 		}
 		return affiliations;
 	}
-	
+
 	private processURL(links: { orcid: string; wikipedia: string; mgp: string; }, url: string): void {
 		if (url.includes('orcid.org')) {
 			links.orcid = url;
