@@ -1,123 +1,9 @@
-import {
-	FrontMatterInfo,
-	getFrontMatterInfo,
-	MarkdownView,
-	normalizePath,
-	Notice,
-	Plugin,
-	requestUrl,
-	TFile,
-	type TAbstractFile
-} from 'obsidian';
+import { FrontMatterInfo, getFrontMatterInfo, MarkdownView, normalizePath, Notice, Plugin, requestUrl, TFile, TAbstractFile } from 'obsidian';
 import * as xml2js from 'xml2js';
 import Fuse, { type FuseResult } from 'fuse.js';
 import FuzzySet from 'fuzzyset';
-
-const PEOPLE_DIR = 'People';
-const CONF_PAPER_DIR = 'Papers/Conference';
-const JOURNAL_PAPER_DIR = 'Papers/Journal';
-const INFORMAL_PAPER_DIR = 'Papers/Informal';
-const ORG_DIR = 'Organizations';
-
-const DBLP_BASE_PID = 'https://dblp.org/pid';
-const DBLP_BASE_PUB = 'https://dblp.dagstuhl.de/rec';
-
-const DBLP_PROPERTY = 'dblp';
-
-interface DblpNote {
-	$: {
-		type: string,
-		label?: string
-	},
-	_: string
-}
-
-interface Person {
-	note?: Array<DblpNote> | DblpNote,
-	url?: Array<string | { _: string }> | string | { _: string }
-}
-
-interface DblpPerson {
-	person: Person,
-	coauthors?: CoauthorList,
-	r: { inproceedings: InProceedings } | { article: Article } | Array<{ inproceedings: InProceedings } | { article: Article }>,
-	$: {
-		n: number,
-		name: string
-	}
-}
-
-interface CoauthorList {
-	$: { n: number },
-	co: Array<Coauthor> | Coauthor
-}
-
-interface Coauthor {
-	$: { n?: number },
-	na: Array<{ _: string, $: { pid: string } }> | { _: string, $: { pid: string } }
-}
-
-function getCoauthorName(coauthor: Coauthor): string {
-	if (Array.isArray(coauthor.na)) {
-		return coauthor.na[0]._;
-	} else {
-		return coauthor.na._;
-	}
-}
-
-function getCoauthorPid(coauthor: Coauthor): string {
-	if (Array.isArray(coauthor.na)) {
-		return coauthor.na[0].$.pid;
-	} else {
-		return coauthor.na.$.pid;
-	}
-}
-
-interface DblpPersonData {
-	dblpperson: DblpPerson
-}
-
-interface InProceedings {
-	title: string,
-	year: string,
-	$: { key: string },
-	author: Array<{ _: string }> | { _: string },
-	booktitle: string
-}
-
-function isInProceedings(x: Publication): x is InProceedings {
-	return 'booktitle' in x;
-}
-
-interface JournalArticle {
-	title: string,
-	year: string,
-	$: { key: string },
-	author: Array<{ _: string }> | { _: string },
-	journal: string
-}
-
-function isJournalArticle(x: Publication): x is JournalArticle {
-	return 'journal' in x && '$' in x && !('publtype' in x.$);
-}
-
-interface InformalArticle {
-	title: string,
-	year: string,
-	$: {
-		key: string,
-		publtype: string
-	},
-	author: Array<{ _: string }> | { _: string },
-	journal: string
-}
-
-function isInformalArticle(x: Publication): x is InformalArticle {
-	return 'journal' in x && '$' in x && 'publtype' in x.$;
-}
-
-type Publication = InProceedings | JournalArticle | InformalArticle;
-type Article = JournalArticle | InformalArticle;
+import { CONF_PAPER_DIR, DBLP_BASE_PID, DBLP_BASE_PUB, DBLP_PROPERTY, EXCEPTION_PREFIXES, FORBIDDEN_CHAR_REPLACEMENT, INFORMAL_PAPER_DIR, JOURNAL_PAPER_DIR, ORG_DIR, PEOPLE_DIR } from './constants';
+import { Article, DblpPerson, DblpPersonData, DblpNote, Coauthor, InProceedings, Person, Publication, isInProceedings, isJournalArticle, isInformalArticle, getCoauthorName, getCoauthorPid } from './dblpTypes';
 
 async function parseXml(xmlString: xml2js.convertableToString): Promise<unknown> {
 	return new Promise((resolve, reject): void => {
@@ -134,32 +20,6 @@ async function parseXml(xmlString: xml2js.convertableToString): Promise<unknown>
 		);
 	});
 }
-
-const FORBIDDEN_CHAR_REPLACEMENT = {
-	'/': '⁄',
-	'\\': '＼',
-	':': '﹕',
-	';': ';',
-	'^': '＾',
-	'|': '┃',
-	'#': '＃',
-	'?': '﹖',
-	'~': '～',
-	'$': '＄',
-	'!': '！',
-	'&': '＆',
-	'@': '＠',
-	'%': '％',
-	'"': '＂',
-	"'": '＇',
-	'<': '＜',
-	'>': '＞',
-	'{': '｛',
-	'}': '｝',
-	'[': '［',
-	']': '］',
-	'*': '＊'
-};
 
 function sanitize(fileName: string | { _: string }): string {
 	if (typeof fileName !== 'string') {
@@ -185,10 +45,6 @@ function exists(property: string, lines: Array<string>): boolean {
 	}
 	return false;
 }
-
-const EXCEPTION_PREFIXES: Array<string> = [
-	'University of California,'
-];
 
 function sliceAtFirstComma(text: string): string {
 
@@ -249,7 +105,6 @@ export default class DblpFetchPlugin extends Plugin {
 	}
 
 	private async createPublicationMdFiles(queued: Array<Publication>): Promise<void> {
-
 		for (const pub of queued) {
 			const title: string = sanitize(pub.title);
 			const year: string = pub.year;
@@ -336,7 +191,7 @@ export default class DblpFetchPlugin extends Plugin {
 			);
 		}
 
-		this.createPublicationMdFiles(pubs);
+		await this.createPublicationMdFiles(pubs);
 	}
 
 	private async populateAuthorNotes(dblpPerson: DblpPerson): Promise<void> {
@@ -479,7 +334,7 @@ export default class DblpFetchPlugin extends Plugin {
 		}
 		return affiliations;
 	}
-
+	
 	private processURL(links: { orcid: string; wikipedia: string; mgp: string; }, url: string): void {
 		if (url.includes('orcid.org')) {
 			links.orcid = url;
@@ -544,4 +399,3 @@ export default class DblpFetchPlugin extends Plugin {
 		new Notice(`Done fetching DBLP data for ${name} from ${dblpUrl}.`);
 	}
 }
-
