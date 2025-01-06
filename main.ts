@@ -161,10 +161,10 @@ export default class DblpFetchPlugin extends Plugin {
 
 					if (key !== fileKey) {
 						const altTitle: string = sanitize(`${title}(${key})`);
-						filePath = sanitize(`${path}/${altTitle}.md`);
+						filePath = `${path}/${altTitle}.md`;
 						created = await this.createFile(filePath, content);
 						if (!created) {
-							console.log(`FAILED TO CREATE: ${path}/${title}.md AND ${path}/${title}(${key}).md...\nMOVING ON...`);
+							console.log(`FAILED TO CREATE: ${path}/${title}.md AND ${path}/${altTitle}.md...\nMOVING ON...`);
 						}
 					}
 				}
