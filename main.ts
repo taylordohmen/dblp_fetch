@@ -176,8 +176,6 @@ export default class DblpFetchPlugin extends Plugin {
 	}
 
 	private async populatePublicationNotes(dblpPerson: DblpPerson): Promise<void> {
-		new Notice('Creating publication notes...');
-
 		let pubs: Array<Publication> = [];
 		if (dblpPerson.$.n == 1) {
 			if ('inproceedings' in dblpPerson.r) {
@@ -199,8 +197,6 @@ export default class DblpFetchPlugin extends Plugin {
 	}
 
 	private async populateAuthorNotes(dblpPerson: DblpPerson): Promise<void> {
-		new Notice('Creating author notes...');
-
 		let coauthors: Array<{ name: string, pid: string }> = [];
 		if (dblpPerson.coauthors) {
 			const co: Coauthor | Array<Coauthor> = dblpPerson.coauthors.co;
@@ -376,10 +372,11 @@ export default class DblpFetchPlugin extends Plugin {
 		const dblpPerson: DblpPerson = xmlData.dblpperson;
 		const name: string = dblpPerson.$.name;
 
-
+		new Notice(`Creating publication notes for ${name}...`);
 		await this.populatePublicationNotes(dblpPerson);
 		new Notice(`Done creating publication notes for ${name}.`);
 
+		new Notice(`Creating co-author notes for ${name}...`);
 		await this.populateAuthorNotes(dblpPerson);
 		new Notice(`Done creating co-author notes for ${name}.`);
 
