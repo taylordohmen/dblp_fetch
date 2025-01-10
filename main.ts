@@ -2,7 +2,7 @@ import { FrontMatterInfo, getFrontMatterInfo, MarkdownView, normalizePath, Notic
 import * as xml2js from 'xml2js';
 import Fuse, { type FuseResult } from 'fuse.js';
 import FuzzySet from 'fuzzyset';
-import { CONF_PAPER_DIR, DBLP_BASE_PID, DBLP_BASE_PUB, DBLP_PROPERTY, EXCEPTION_PREFIXES, FORBIDDEN_CHAR_REPLACEMENT, INFORMAL_PAPER_DIR, JOURNAL_PAPER_DIR, ORG_DIR, PEOPLE_DIR } from './constants';
+import { CONF_PAPER_DIR, DBLP_BASE_URLS, DBLP_PID_ROUTE, DBLP_PUB_ROUTE, DBLP_PROPERTY, EXCEPTION_PREFIXES, FORBIDDEN_CHAR_REPLACEMENT, INFORMAL_PAPER_DIR, JOURNAL_PAPER_DIR, ORG_DIR, PEOPLE_DIR, DBLP_MAIN_URL } from './constants';
 import { Article, DblpPerson, DblpPersonData, DblpNote, Coauthor, InProceedings, Person, Publication, isInProceedings, isJournalArticle, isInformalArticle, getCoauthorName, getCoauthorPid } from './dblpTypes';
 
 async function parseXml(xmlString: xml2js.convertableToString): Promise<unknown> {
@@ -113,7 +113,26 @@ export default class DblpFetchPlugin extends Plugin {
 			const year: string = pub.year;
 			const key: string = pub.$.key.trim();
 
-			const citation: string = await requestUrl(`${DBLP_BASE_PUB}/${pub.$.key}.bib`).text;
+			let citation = '';
+			for (const base of DBLP_BASE_URLS) {
+				const url = `${base}/${DBLP_PUB_ROUTE}/${pub.$.key}.bib`;
+				try {
+					citation = await requestUrl(url).text;
+				} catch (error) {
+					// Probably a timeout exception
+					console.log(error);
+					console.log(url);
+				}
+				if (citation) {
+					break;
+				}
+			}
+			if (!citation) {
+				new Notice(`Unable to fetch data for publication ${title} with key ${pub.$.key}.`);
+				continue;
+			}
+
+
 			let authors: Array<string>;
 			if (Array.isArray(pub.author)) {
 				authors = pub.author.map(
@@ -225,6 +244,7 @@ export default class DblpFetchPlugin extends Plugin {
 		for (const coauthor of coauthors) {
 			const { name, pid } = coauthor;
 			const filePath = `${PEOPLE_DIR}/${name}.md`;
+			const profileUrl = `${DBLP_MAIN_URL}/${DBLP_PID_ROUTE}/${pid}`;
 			if (existingPeople.has(name)) {
 				const file: TFile | null = this.app.vault.getFileByPath(filePath);
 				if (file) {
@@ -232,23 +252,23 @@ export default class DblpFetchPlugin extends Plugin {
 						let newContent: Array<string> = content.split('\n');
 						if (newContent.length > 0) {
 							if (hasProperties(newContent) && !exists(DBLP_PROPERTY, newContent)) {
-								newContent.splice(1, 0, `dblp: ${DBLP_BASE_PID}/${pid}`);
+								newContent.splice(1, 0, `dblp: ${profileUrl}`);
 							} else if (!hasProperties(newContent)) {
 								newContent = [
 									'---',
-									`dblp: ${DBLP_BASE_PID}/${pid}`,
+									`dblp: ${profileUrl}`,
 									'---',
 									...content
 								];
 							}
 							return newContent.join('\n');
 						} else {
-							return `---\ndblp: ${DBLP_BASE_PID}/${pid}\n---\n`;
+							return `---\ndblp: ${profileUrl}\n---\n`;
 						}
 					});
 				}
 			} else {
-				await this.createFile(filePath, `---\ndblp: ${DBLP_BASE_PID}/${pid}\n---\n`);
+				await this.createFile(filePath, `---\ndblp: ${profileUrl}\n---\n`);
 			}
 		}
 	}
@@ -366,8 +386,33 @@ export default class DblpFetchPlugin extends Plugin {
 	}
 
 	private async fetch(dblpUrl: string, personFile: TFile): Promise<void> {
-		// Fetch and parse XML data
-		const response: string = await requestUrl(`${dblpUrl}.xml`).text;
+
+		new Notice(`Fetching DBLP profile data for ${personFile.basename}.`)
+
+		const pid = dblpUrl.split(`/${DBLP_PID_ROUTE}/`).at(-1);
+
+		// Fetch xml data for dblp profile
+		let response = '';
+		for (const base of DBLP_BASE_URLS) {
+			const url = `${base}/${DBLP_PID_ROUTE}/${pid}.xml`;
+			try {
+				response = await requestUrl(url).text;
+			} catch (error) {
+				// Probably a timeout exception
+				console.log(error);
+				console.log(url);
+			}
+			if (response) {
+				break;
+			}
+		}
+
+		if (!response) {
+			new Notice(`Unable to fetch data for ${personFile.basename}.`);
+			return;
+		}
+
+		// Parse XML data
 		const xmlData: DblpPersonData = await parseXml(response) as DblpPersonData;
 		const dblpPerson: DblpPerson = xmlData.dblpperson;
 		const name: string = dblpPerson.$.name;

@@ -8,9 +8,16 @@ export const INFORMAL_PAPER_DIR = 'Papers/Informal';
 
 export const ORG_DIR = 'Organizations';
 
-export const DBLP_BASE_PID = 'https://dblp.org/pid';
+export const DBLP_BASE_URLS: Array<string> = [
+    'https://dblp.org',
+    'https://dblp.uni-trier.de',
+    'https://dblp.dagstuhl.de'
+];
 
-export const DBLP_BASE_PUB = 'https://dblp.dagstuhl.de/rec';
+export const DBLP_MAIN_URL = DBLP_BASE_URLS[0];
+
+export const DBLP_PID_ROUTE = 'pid';
+export const DBLP_PUB_ROUTE = 'rec';
 
 export const DBLP_PROPERTY = 'dblp';
 
