@@ -66,6 +66,11 @@ function sliceAtFirstComma(text: string): string {
 	return text;
 }
 
+function rotateArray(arr: Array<unknown>): void {
+	const head = arr.shift();
+	arr.push(head);
+}
+
 // Main plugin class
 export default class DblpFetchPlugin extends Plugin {
 
@@ -120,8 +125,8 @@ export default class DblpFetchPlugin extends Plugin {
 					citation = await requestUrl(url).text;
 				} catch (error) {
 					// Probably a timeout exception
-					console.log(error);
-					console.log(url);
+					console.log(`Request to ${url} failed.\n\n${error}`);
+					rotateArray(DBLP_BASE_URLS);
 				}
 				if (citation) {
 					break;
@@ -399,8 +404,8 @@ export default class DblpFetchPlugin extends Plugin {
 				response = await requestUrl(url).text;
 			} catch (error) {
 				// Probably a timeout exception
-				console.log(error);
-				console.log(url);
+				console.log(`Request to ${url} failed.\n\n${error}`);
+				rotateArray(DBLP_BASE_URLS);
 			}
 			if (response) {
 				break;
@@ -419,11 +424,9 @@ export default class DblpFetchPlugin extends Plugin {
 
 		new Notice(`Creating publication notes for ${name}...`);
 		await this.populatePublicationNotes(dblpPerson);
-		new Notice(`Done creating publication notes for ${name}.`);
 
 		new Notice(`Creating co-author notes for ${name}...`);
 		await this.populateAuthorNotes(dblpPerson);
-		new Notice(`Done creating co-author notes for ${name}.`);
 
 		const affiliations: Array<string> = await this.getAffiliations(dblpPerson);
 		let links: Array<string> = this.getLinks(dblpPerson);

@@ -14,7 +14,7 @@ export const DBLP_BASE_URLS: Array<string> = [
     'https://dblp.dagstuhl.de'
 ];
 
-export const DBLP_MAIN_URL = DBLP_BASE_URLS[0];
+export const DBLP_MAIN_URL = 'https://dblp.org';
 
 export const DBLP_PID_ROUTE = 'pid';
 export const DBLP_PUB_ROUTE = 'rec';
