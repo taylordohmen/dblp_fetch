@@ -69,6 +69,7 @@ function sliceAtFirstComma(text: string): string {
 function rotateArray(arr: Array<unknown>): void {
 	const head = arr.shift();
 	arr.push(head);
+	console.log(arr);
 }
 
 // Main plugin class
@@ -342,10 +343,10 @@ export default class DblpFetchPlugin extends Plugin {
 					const [bestFuzzyScore, bestFuzzyItem] = fuzzyResults[0];
 					const { score, item } = fuseResults[0];
 
-					// console.log(`Fuzzy: ${bestFuzzyItem} ${bestFuzzyScore}`);
-					// console.log(`Fuse: ${item} ${score}`);
+					console.log(`Fuzzy: ${bestFuzzyItem} ${bestFuzzyScore}`);
+					console.log(`Fuse: ${item} ${score}`);
 
-					if (bestFuzzyItem === item && bestFuzzyScore >= 0.75 && score !== undefined && score <= 0.33) {
+					if (bestFuzzyItem === item && bestFuzzyScore >= 0.75 && score !== undefined && score <= 0.3) {
 						affil = organizations.get(item) || affil;
 					} else {
 						await this.createFile(`${ORG_DIR}/${org}.md`, '');
