@@ -442,7 +442,6 @@ export default class DblpFetchPlugin extends Plugin {
 		const dateTime = new Date(Date.now());
 
 		const coauthorSnippet: string = (await this.loadCoauthorSnippet()).replace('js', 'dataviewjs');
-		console.log(coauthorSnippet);
 		if (!coauthorSnippet) {
 			new Notice(`Unable to load coauthor snippet from ${COAUTHOR_SNIPPET_FILEPATH}.`);
 		}
