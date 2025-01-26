@@ -2,7 +2,7 @@ import { FrontMatterInfo, getFrontMatterInfo, MarkdownView, normalizePath, Notic
 import * as xml2js from 'xml2js';
 import Fuse, { type FuseResult } from 'fuse.js';
 import FuzzySet from 'fuzzyset';
-import { CONF_PAPER_DIR, DBLP_BASE_URLS, DBLP_PID_ROUTE, DBLP_PUB_ROUTE, DBLP_PROPERTY, EXCEPTION_PREFIXES, FORBIDDEN_CHAR_REPLACEMENT, INFORMAL_PAPER_DIR, JOURNAL_PAPER_DIR, ORG_DIR, PEOPLE_DIR, DBLP_MAIN_URL } from './constants';
+import { COAUTHOR_SNIPPET_FILEPATH, CONF_PAPER_DIR, DBLP_BASE_URLS, DBLP_PID_ROUTE, DBLP_PUB_ROUTE, DBLP_PROPERTY, EXCEPTION_PREFIXES, FORBIDDEN_CHAR_REPLACEMENT, INFORMAL_PAPER_DIR, JOURNAL_PAPER_DIR, ORG_DIR, PEOPLE_DIR, DBLP_MAIN_URL } from './constants';
 import { Article, DblpPerson, DblpPersonData, DblpNote, Coauthor, InProceedings, Person, Publication, isInProceedings, isJournalArticle, isInformalArticle, getCoauthorName, getCoauthorPid } from './dblpTypes';
 
 async function parseXml(xmlString: xml2js.convertableToString): Promise<unknown> {
@@ -391,6 +391,14 @@ export default class DblpFetchPlugin extends Plugin {
 		);
 	}
 
+	private async loadCoauthorSnippet(): Promise<string> {
+		const file = this.app.vault.getFileByPath(COAUTHOR_SNIPPET_FILEPATH);
+		if (file) {
+			return this.app.vault.cachedRead(file);
+		}
+		return '';
+	}
+
 	private async fetch(dblpUrl: string, personFile: TFile): Promise<void> {
 
 		new Notice(`Fetching DBLP profile data for ${personFile.basename}.`)
@@ -433,6 +441,12 @@ export default class DblpFetchPlugin extends Plugin {
 		let links: Array<string> = this.getLinks(dblpPerson);
 		const dateTime = new Date(Date.now());
 
+		const coauthorSnippet: string = (await this.loadCoauthorSnippet()).replace('js', 'dataviewjs');
+		console.log(coauthorSnippet);
+		if (!coauthorSnippet) {
+			new Notice(`Unable to load coauthor snippet from ${COAUTHOR_SNIPPET_FILEPATH}.`);
+		}
+
 		await this.app.vault.process(personFile, (data: string): string => {
 			links = links.filter((link: string): boolean => !data.includes(link));
 			const newData: string = data
@@ -443,7 +457,7 @@ export default class DblpFetchPlugin extends Plugin {
 				).concat(
 					affiliations.map((affil: string): string => `affiliation:: [[${affil}]]`)
 				).join('\n');
-			return `${newData}\n\nLast DBLP fetch: ${dateTime}`.replaceAll(/\n(\n)+/g, '\n\n');
+			return `${newData}\n\nLast DBLP fetch: ${dateTime}\n\n${coauthorSnippet}`.replaceAll(/\n(\n)+/g, '\n\n');
 		});
 
 		new Notice(`Done fetching DBLP data for ${name} from ${dblpUrl}.`);

@@ -50,3 +50,5 @@ export const FORBIDDEN_CHAR_REPLACEMENT = {
 export const EXCEPTION_PREFIXES: Array<string> = [
     'University of California,'
 ];
+
+export const COAUTHOR_SNIPPET_FILEPATH = 'Dataview Snippets/Coauthor List.md';
