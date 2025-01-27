@@ -457,8 +457,6 @@ export default class DblpFetchPlugin extends Plugin {
 		}
 
 		await this.app.vault.process(personFile, (data: string): string => {
-			console.log(data);
-
 			links = links.filter((link: string): boolean => !data.includes(link));
 			const newData: string = data
 				.replace(/```.+?```/sg, '')
@@ -469,9 +467,6 @@ export default class DblpFetchPlugin extends Plugin {
 				).concat(
 					affiliations.map((affil: string): string => `affiliation:: [[${affil}]]`)
 				).join('\n');
-
-				console.log(newData);
-
 			return `${newData}\n\nLast DBLP fetch: ${dateTime}\n\n${coauthorSnippet}`.replaceAll(/\n(\n)+/g, '\n\n');
 		});
 
