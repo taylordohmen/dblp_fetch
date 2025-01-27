@@ -2,7 +2,7 @@ import { FrontMatterInfo, getFrontMatterInfo, MarkdownView, normalizePath, Notic
 import * as xml2js from 'xml2js';
 import Fuse, { type FuseResult } from 'fuse.js';
 import FuzzySet from 'fuzzyset';
-import { COAUTHOR_SNIPPET_FILEPATH, CONF_PAPER_DIR, DBLP_BASE_URLS, DBLP_PID_ROUTE, DBLP_PUB_ROUTE, DBLP_PROPERTY, EXCEPTION_PREFIXES, FORBIDDEN_CHAR_REPLACEMENT, INFORMAL_PAPER_DIR, JOURNAL_PAPER_DIR, ORG_DIR, PEOPLE_DIR, DBLP_MAIN_URL } from './constants';
+import { COAUTHOR_SNIPPET_FILEPATH, CONF_PAPER_DIR, DBLP_BASE_URLS, DBLP_PID_ROUTE, DBLP_PUB_ROUTE, DBLP_PROPERTY, EXCEPTION_PREFIXES, FORBIDDEN_CHAR_REPLACEMENT, INFORMAL_PAPER_DIR, JOURNAL_PAPER_DIR, ORG_EXCEPTIONS, ORG_DIR, PEOPLE_DIR, DBLP_MAIN_URL } from './constants';
 import { Article, DblpPerson, DblpPersonData, DblpNote, Coauthor, InProceedings, Person, Publication, isInProceedings, isJournalArticle, isInformalArticle, getCoauthorName, getCoauthorPid } from './dblpTypes';
 
 async function parseXml(xmlString: xml2js.convertableToString): Promise<unknown> {
@@ -281,6 +281,7 @@ export default class DblpFetchPlugin extends Plugin {
 
 	private async getAffiliations(dblpPerson: DblpPerson): Promise<Array<string>> {
 		const person: Person = dblpPerson.person;
+		const name: string = dblpPerson.$.name;
 		const dblpAffiliations: Array<string> = [];
 		const affiliations: Array<string> = [];
 
@@ -295,6 +296,15 @@ export default class DblpFetchPlugin extends Plugin {
 				);
 			} else if (person.note.$ !== undefined && person.note.$.type === 'affiliation' && !person.note.$.label) {
 				dblpAffiliations.push(sliceAtFirstComma(person.note._));
+			}
+
+			for (const { author, incorrectOrg, correctOrg } of ORG_EXCEPTIONS) {
+				if (name === author) {
+					const index: number = dblpAffiliations.indexOf(incorrectOrg);
+					if (index >= 0) {
+						dblpAffiliations[index] = correctOrg;
+					}
+				}
 			}
 
 			const orgFiles: Array<TFile> = (this.app.vault.getFolderByPath(ORG_DIR)?.children || []).filter(
@@ -447,8 +457,11 @@ export default class DblpFetchPlugin extends Plugin {
 		}
 
 		await this.app.vault.process(personFile, (data: string): string => {
+			console.log(data);
+
 			links = links.filter((link: string): boolean => !data.includes(link));
 			const newData: string = data
+				.replace(/```.+?```/sg, '')
 				.split('\n')
 				.toSpliced(1, 0, ...links)
 				.filter(
@@ -456,6 +469,9 @@ export default class DblpFetchPlugin extends Plugin {
 				).concat(
 					affiliations.map((affil: string): string => `affiliation:: [[${affil}]]`)
 				).join('\n');
+
+				console.log(newData);
+
 			return `${newData}\n\nLast DBLP fetch: ${dateTime}\n\n${coauthorSnippet}`.replaceAll(/\n(\n)+/g, '\n\n');
 		});
 

@@ -51,4 +51,12 @@ export const EXCEPTION_PREFIXES: Array<string> = [
     'University of California,'
 ];
 
+export const ORG_EXCEPTIONS: Array<{ author: string, incorrectOrg: string, correctOrg: string }> = [
+    {
+        author: 'Claire Mathieu',
+        incorrectOrg: 'CNRS',
+        correctOrg: 'École Normale Supérieure'
+    }
+];
+
 export const COAUTHOR_SNIPPET_FILEPATH = 'Dataview Snippets/Coauthor List.md';
