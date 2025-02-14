@@ -59,4 +59,4 @@ export const ORG_EXCEPTIONS: Array<{ author: string, incorrectOrg: string, corre
     }
 ];
 
-export const COAUTHOR_SNIPPET_FILEPATH = 'Dataview Snippets/CustomJS Coauthor List.md';
+export const COAUTHOR_SNIPPET_FILEPATH = 'JavaScript Snippets/CustomJS Coauthor List.md';

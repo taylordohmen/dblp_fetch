@@ -463,11 +463,11 @@ export default class DblpFetchPlugin extends Plugin {
 				.split('\n')
 				.toSpliced(1, 0, ...links)
 				.filter(
-					(line: string): boolean => !line.startsWith('Last DBLP fetch:')// && !line.startsWith('affiliation::')
+					(line: string): boolean => !line.startsWith('Last DBLP fetch:') && !line.startsWith('## Coauthors')
 				).concat(
 					affiliations.map((affil: string): string => `affiliation:: [[${affil}]]`)
 				).join('\n');
-			return `${newData}\n\nLast DBLP fetch: ${dateTime}\n\n${coauthorSnippet}`.replaceAll(/\n(\n)+/g, '\n\n');
+			return `${newData}\n\nLast DBLP fetch: ${dateTime}\n\n## Coauthors\n${coauthorSnippet}`.replaceAll(/\n(\n)+/g, '\n\n');
 		});
 
 		new Notice(`Done fetching DBLP data for ${name} from ${dblpUrl}.`);
