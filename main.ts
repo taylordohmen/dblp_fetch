@@ -463,7 +463,7 @@ export default class DblpFetchPlugin extends Plugin {
 				.split('\n')
 				.toSpliced(1, 0, ...links)
 				.filter(
-					(line: string): boolean => !line.startsWith('Last DBLP fetch:') && !line.startsWith('affiliation::')
+					(line: string): boolean => !line.startsWith('Last DBLP fetch:')// && !line.startsWith('affiliation::')
 				).concat(
 					affiliations.map((affil: string): string => `affiliation:: [[${affil}]]`)
 				).join('\n');
